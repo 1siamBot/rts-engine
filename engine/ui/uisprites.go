@@ -42,7 +42,26 @@ type UISprites struct {
 	IconDeploy  *ebiten.Image
 	IconPower   *ebiten.Image
 	IconSell    *ebiten.Image
+	IconRepair  *ebiten.Image
+	IconCredits *ebiten.Image
 	Crosshair   *ebiten.Image
+
+	// RA2-style build icons (per building key)
+	BuildIcons map[string]*ebiten.Image
+
+	// RA2-style panel textures
+	RA2SidebarBG   *ebiten.Image
+	RA2TopBarBG    *ebiten.Image
+	RA2BottomPanel *ebiten.Image
+	RA2MinimapFrame *ebiten.Image
+	RA2TabActive   *ebiten.Image
+	RA2TabInactive *ebiten.Image
+	RA2BuildSlotNormal   *ebiten.Image
+	RA2BuildSlotHover    *ebiten.Image
+	RA2BuildSlotDisabled *ebiten.Image
+	RA2BuildSlotActive   *ebiten.Image
+	RA2DarkSteelTile     *ebiten.Image
+	RA2PanelDivider      *ebiten.Image
 
 	// Generated panel textures
 	PanelDark     *ebiten.Image // dark metallic panel (tileable)
@@ -59,9 +78,14 @@ type UISprites struct {
 }
 
 func NewUISprites() *UISprites {
-	us := &UISprites{}
+	us := &UISprites{
+		BuildIcons: make(map[string]*ebiten.Image),
+	}
 	uiDir := getUIAssetsDir()
 	log.Printf("Loading UI assets from: %s", uiDir)
+
+	// Load RA2-style UI assets first (priority)
+	us.loadRA2UIAssets()
 
 	// Load button sprites
 	us.BtnNormal = loadUI(filepath.Join(uiDir, "buttons", "btn_normal.png"))
@@ -110,6 +134,87 @@ func NewUISprites() *UISprites {
 	return us
 }
 
+func (us *UISprites) loadRA2UIAssets() {
+	// Find assets/ra2/ui directory
+	candidates := []string{
+		"assets/ra2/ui",
+		"../assets/ra2/ui",
+		"../../assets/ra2/ui",
+	}
+	_, filename, _, ok := runtime.Caller(0)
+	if ok {
+		srcDir := filepath.Dir(filename)
+		candidates = append(candidates,
+			filepath.Join(srcDir, "../../assets/ra2/ui"),
+			filepath.Join(srcDir, "../../../assets/ra2/ui"),
+		)
+	}
+
+	var ra2Dir string
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			ra2Dir = c
+			break
+		}
+	}
+	if ra2Dir == "" {
+		return
+	}
+
+	log.Printf("Loading RA2 UI assets from: %s", ra2Dir)
+	loaded := 0
+
+	// Panel textures
+	if img := loadUI(filepath.Join(ra2Dir, "panels", "sidebar_bg.png")); img != nil { us.RA2SidebarBG = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "panels", "topbar_bg.png")); img != nil { us.RA2TopBarBG = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "panels", "bottom_panel.png")); img != nil { us.RA2BottomPanel = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "panels", "minimap_frame.png")); img != nil { us.RA2MinimapFrame = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "panels", "dark_steel_tile.png")); img != nil { us.RA2DarkSteelTile = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "panels", "panel_divider.png")); img != nil { us.RA2PanelDivider = img; loaded++ }
+
+	// Tab buttons
+	if img := loadUI(filepath.Join(ra2Dir, "sidebar", "tab_active.png")); img != nil { us.RA2TabActive = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "sidebar", "tab_inactive.png")); img != nil { us.RA2TabInactive = img; loaded++ }
+
+	// Build slot buttons
+	if img := loadUI(filepath.Join(ra2Dir, "sidebar", "build_slot_normal.png")); img != nil { us.RA2BuildSlotNormal = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "sidebar", "build_slot_hover.png")); img != nil { us.RA2BuildSlotHover = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "sidebar", "build_slot_disabled.png")); img != nil { us.RA2BuildSlotDisabled = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "sidebar", "build_slot_active.png")); img != nil { us.RA2BuildSlotActive = img; loaded++ }
+
+	// Command icons (override existing)
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_move.png")); img != nil { us.IconMove = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_attack.png")); img != nil { us.IconAttack = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_stop.png")); img != nil { us.IconStop = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_guard.png")); img != nil { us.IconGuard = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_deploy.png")); img != nil { us.IconDeploy = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_sell.png")); img != nil { us.IconSell = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_repair.png")); img != nil { us.IconRepair = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "cmd_rally.png")); img != nil { us.IconRally = img; loaded++ }
+
+	// Resource icons
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "credits.png")); img != nil { us.IconCredits = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "icons", "power.png")); img != nil { us.IconPower = img; loaded++ }
+
+	// Build icons
+	buildingKeys := []string{"construction_yard", "power_plant", "barracks", "refinery", "war_factory"}
+	for _, key := range buildingKeys {
+		if img := loadUI(filepath.Join(ra2Dir, "icons", "build_"+key+".png")); img != nil {
+			us.BuildIcons[key] = img
+			loaded++
+		}
+	}
+
+	// Bar textures (override existing)
+	if img := loadUI(filepath.Join(ra2Dir, "bars", "health_green.png")); img != nil { us.BarHealth = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "bars", "health_red.png")); img != nil { us.BarHealthLow = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "bars", "power_bar.png")); img != nil { us.BarPower = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "bars", "progress_bar.png")); img != nil { us.BarProgress = img; loaded++ }
+	if img := loadUI(filepath.Join(ra2Dir, "bars", "bar_bg.png")); img != nil { us.BarBG = img; loaded++ }
+
+	log.Printf("RA2 UI: loaded %d assets", loaded)
+}
+
 func (us *UISprites) generateMetallicTextures() {
 	// Dark metallic panel texture (256x256, tileable)
 	us.PanelDark = generateDarkMetalPanel(256, 256)
@@ -136,6 +241,17 @@ func (us *UISprites) GenerateSidebarPanel(w, h int) *ebiten.Image {
 			return us.SidebarPanel
 		}
 	}
+	// Use RA2 sidebar texture if available (scale to fit)
+	if us.RA2SidebarBG != nil {
+		panel := ebiten.NewImage(w, h)
+		op := &ebiten.DrawImageOptions{}
+		srcW := us.RA2SidebarBG.Bounds().Dx()
+		srcH := us.RA2SidebarBG.Bounds().Dy()
+		op.GeoM.Scale(float64(w)/float64(srcW), float64(h)/float64(srcH))
+		panel.DrawImage(us.RA2SidebarBG, op)
+		us.SidebarPanel = panel
+		return us.SidebarPanel
+	}
 	us.SidebarPanel = us.compositePanel(w, h)
 	return us.SidebarPanel
 }
@@ -148,6 +264,16 @@ func (us *UISprites) GenerateTopBarPanel(w, h int) *ebiten.Image {
 		if sw == w && sh == h {
 			return us.TopBarPanel
 		}
+	}
+	if us.RA2TopBarBG != nil {
+		panel := ebiten.NewImage(w, h)
+		op := &ebiten.DrawImageOptions{}
+		srcW := us.RA2TopBarBG.Bounds().Dx()
+		srcH := us.RA2TopBarBG.Bounds().Dy()
+		op.GeoM.Scale(float64(w)/float64(srcW), float64(h)/float64(srcH))
+		panel.DrawImage(us.RA2TopBarBG, op)
+		us.TopBarPanel = panel
+		return us.TopBarPanel
 	}
 	us.TopBarPanel = us.compositePanel(w, h)
 	return us.TopBarPanel
@@ -162,6 +288,16 @@ func (us *UISprites) GenerateBottomPanel(w, h int) *ebiten.Image {
 			return us.BottomPanel
 		}
 	}
+	if us.RA2BottomPanel != nil {
+		panel := ebiten.NewImage(w, h)
+		op := &ebiten.DrawImageOptions{}
+		srcW := us.RA2BottomPanel.Bounds().Dx()
+		srcH := us.RA2BottomPanel.Bounds().Dy()
+		op.GeoM.Scale(float64(w)/float64(srcW), float64(h)/float64(srcH))
+		panel.DrawImage(us.RA2BottomPanel, op)
+		us.BottomPanel = panel
+		return us.BottomPanel
+	}
 	us.BottomPanel = us.compositePanel(w, h)
 	return us.BottomPanel
 }
@@ -173,6 +309,18 @@ func (us *UISprites) GenerateMinimapFrame(size int) *ebiten.Image {
 		if sw == size+8 {
 			return us.MinimapFrame
 		}
+	}
+	if us.RA2MinimapFrame != nil {
+		frameW := size + 8
+		frameH := size + 24
+		panel := ebiten.NewImage(frameW, frameH)
+		op := &ebiten.DrawImageOptions{}
+		srcW := us.RA2MinimapFrame.Bounds().Dx()
+		srcH := us.RA2MinimapFrame.Bounds().Dy()
+		op.GeoM.Scale(float64(frameW)/float64(srcW), float64(frameH)/float64(srcH))
+		panel.DrawImage(us.RA2MinimapFrame, op)
+		us.MinimapFrame = panel
+		return us.MinimapFrame
 	}
 	frameW := size + 8
 	frameH := size + 24
@@ -265,6 +413,26 @@ func (us *UISprites) DrawButton(screen *ebiten.Image, x, y, w, h int, state stri
 
 // DrawRectButton draws a rectangular button with state
 func (us *UISprites) DrawRectButton(screen *ebiten.Image, x, y, w, h int, state string) {
+	// Try RA2 build slot textures first
+	var ra2Btn *ebiten.Image
+	switch state {
+	case "hover":
+		ra2Btn = us.RA2BuildSlotHover
+	case "active":
+		ra2Btn = us.RA2BuildSlotActive
+	case "disabled":
+		ra2Btn = us.RA2BuildSlotDisabled
+	default:
+		ra2Btn = us.RA2BuildSlotNormal
+	}
+	if ra2Btn != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Scale(float64(w)/float64(ra2Btn.Bounds().Dx()), float64(h)/float64(ra2Btn.Bounds().Dy()))
+		op.GeoM.Translate(float64(x), float64(y))
+		screen.DrawImage(ra2Btn, op)
+		return
+	}
+
 	var btn *ebiten.Image
 	switch state {
 	case "hover":
@@ -348,6 +516,34 @@ func (us *UISprites) DrawIcon(screen *ebiten.Image, icon *ebiten.Image, x, y, si
 	op.GeoM.Scale(scale, scale)
 	op.GeoM.Translate(float64(x)-float64(iw)*scale/2, float64(y)-float64(ih)*scale/2)
 	screen.DrawImage(icon, op)
+}
+
+// GetBuildIcon returns the build icon for a building key
+func (us *UISprites) GetBuildIcon(key string) *ebiten.Image {
+	return us.BuildIcons[key]
+}
+
+// DrawTabButton draws a tab button using RA2 textures if available
+func (us *UISprites) DrawTabButton(screen *ebiten.Image, x, y, w, h int, active bool) {
+	var tab *ebiten.Image
+	if active {
+		tab = us.RA2TabActive
+	} else {
+		tab = us.RA2TabInactive
+	}
+	if tab != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Scale(float64(w)/float64(tab.Bounds().Dx()), float64(h)/float64(tab.Bounds().Dy()))
+		op.GeoM.Translate(float64(x), float64(y))
+		screen.DrawImage(tab, op)
+		return
+	}
+	// Fallback to DrawRectButton
+	state := "normal"
+	if active {
+		state = "active"
+	}
+	us.DrawRectButton(screen, x, y, w, h, state)
 }
 
 // GetCommandIcon returns the icon for a command type

@@ -587,19 +587,15 @@ func (h *HUD) drawSidebar(screen *ebiten.Image, w *core.World) {
 		drawRoundedRect(screen, float32(sx), float32(sy), float32(h.SidebarWidth), float32(sh), 0, panelBG)
 	}
 
-	// Tab buttons using sci-fi button sprites
+	// Tab buttons using RA2-style tab sprites
 	tabNames := []string{"BUILD", "UNITS", "DEF"}
 	tabW := (h.SidebarWidth - 20) / 3
 	for i, name := range tabNames {
 		tx := sx + 10 + i*tabW
 		ty := sy + 8
 		isActive := BuildTab(i) == h.ActiveTab
-		state := "normal"
-		if isActive {
-			state = "active"
-		}
 
-		h.Sprites.DrawRectButton(screen, tx, ty, tabW-4, 24, state)
+		h.Sprites.DrawTabButton(screen, tx, ty, tabW-4, 24, isActive)
 		textX := tx + (tabW-4)/2 - len(name)*3
 		ebitenutil.DebugPrintAt(screen, name, textX, ty+7)
 	}
@@ -662,17 +658,25 @@ func (h *HUD) drawBuildingButtons(screen *ebiten.Image, w *core.World, sx, start
 		vector.StrokeLine(screen, iconX+40, iconY, iconX+40, iconY+40, 1, color.RGBA{8, 10, 15, 200}, false)
 		vector.StrokeLine(screen, iconX, iconY+40, iconX+40, iconY+40, 1, color.RGBA{8, 10, 15, 200}, false)
 
-		// Building icon: colored isometric block
-		if enabled {
+		// Building icon: use RA2 build icon if available
+		if buildIcon := h.Sprites.GetBuildIcon(key); buildIcon != nil {
+			op := &ebiten.DrawImageOptions{}
+			iw := buildIcon.Bounds().Dx()
+			ih := buildIcon.Bounds().Dy()
+			op.GeoM.Scale(38.0/float64(iw), 38.0/float64(ih))
+			op.GeoM.Translate(float64(iconX)+1, float64(iconY)+1)
+			if !enabled {
+				op.ColorScale.Scale(0.4, 0.4, 0.4, 0.8)
+			}
+			screen.DrawImage(buildIcon, op)
+		} else if enabled {
 			cx := iconX + 20
 			cy := iconY + 20
 			bclr := accentBlue
-			// Draw simple isometric building shape
 			drawIsoBlock(screen, cx, cy, 14, 10, bclr)
-		}
-		// Initial letter overlay
-		if len(bdef.Name) > 0 {
-			ebitenutil.DebugPrintAt(screen, string(bdef.Name[0]), int(iconX)+16, int(iconY)+14)
+			if len(bdef.Name) > 0 {
+				ebitenutil.DebugPrintAt(screen, string(bdef.Name[0]), int(iconX)+16, int(iconY)+14)
+			}
 		}
 
 		// Name + Cost text
