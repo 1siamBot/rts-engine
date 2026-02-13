@@ -11,6 +11,7 @@ import (
 	"runtime"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 // UISprites holds all loaded UI sprite images
@@ -570,97 +571,114 @@ func (us *UISprites) GetCommandIcon(cmd CommandType) *ebiten.Image {
 // ---- Procedural texture generation ----
 
 func generateDarkMetalPanel(w, h int) *ebiten.Image {
-	img := ebiten.NewImage(w, h)
-
-	// Create metallic gradient with noise
+	pix := make([]byte, w*h*4)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Base dark blue-grey
 			base := 22.0
-			// Vertical gradient (slightly lighter at top)
 			grad := base + 8.0*(1.0-float64(y)/float64(h))
-			// Brushed metal horizontal lines
 			lineNoise := 2.0 * math.Sin(float64(y)*0.8+float64(x)*0.01)
-			// Subtle noise
 			noise := 3.0 * math.Sin(float64(x*7919+y*7927)*0.001)
-
 			v := grad + lineNoise + noise
-			r := uint8(math.Max(0, math.Min(255, v*0.9)))
-			g := uint8(math.Max(0, math.Min(255, v*0.95)))
-			b := uint8(math.Max(0, math.Min(255, v*1.2)))
-
-			img.Set(x, y, color.NRGBA{r, g, b, 230})
+			off := (y*w + x) * 4
+			pix[off] = uint8(math.Max(0, math.Min(255, v*0.9*230/255)))
+			pix[off+1] = uint8(math.Max(0, math.Min(255, v*0.95*230/255)))
+			pix[off+2] = uint8(math.Max(0, math.Min(255, v*1.2*230/255)))
+			pix[off+3] = 230
 		}
 	}
+	img := ebiten.NewImage(w, h)
+	img.WritePixels(pix)
 	return img
 }
 
 func generateBrushedMetal(w, h int) *ebiten.Image {
-	img := ebiten.NewImage(w, h)
+	pix := make([]byte, w*h*4)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			base := 50.0
 			brush := 10.0 * math.Sin(float64(x)*0.3+float64(y)*0.1)
 			v := base + brush
-			r := uint8(math.Max(0, math.Min(255, v)))
-			g := uint8(math.Max(0, math.Min(255, v*1.05)))
-			b := uint8(math.Max(0, math.Min(255, v*1.15)))
-			img.Set(x, y, color.NRGBA{r, g, b, 255})
+			off := (y*w + x) * 4
+			pix[off] = uint8(math.Max(0, math.Min(255, v)))
+			pix[off+1] = uint8(math.Max(0, math.Min(255, v*1.05)))
+			pix[off+2] = uint8(math.Max(0, math.Min(255, v*1.15)))
+			pix[off+3] = 255
 		}
 	}
+	img := ebiten.NewImage(w, h)
+	img.WritePixels(pix)
 	return img
 }
 
 func generateRivet(size int) *ebiten.Image {
-	img := ebiten.NewImage(size, size)
+	pix := make([]byte, size*size*4)
 	cx, cy := float64(size)/2, float64(size)/2
 	r := float64(size)/2 - 1
-
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
 			dx := float64(x) - cx
 			dy := float64(y) - cy
 			dist := math.Sqrt(dx*dx + dy*dy)
+			off := (y*size + x) * 4
 			if dist <= r {
-				// 3D shading
 				nx := dx / r
 				ny := dy / r
 				light := 0.5 + 0.5*(nx*0.3-ny*0.5)
 				v := uint8(math.Max(0, math.Min(255, light*180)))
-				img.Set(x, y, color.NRGBA{v, v, uint8(float64(v) * 1.1), 255})
+				pix[off] = v
+				pix[off+1] = v
+				pix[off+2] = uint8(math.Min(255, float64(v)*1.1))
+				pix[off+3] = 255
 			}
 		}
 	}
+	img := ebiten.NewImage(size, size)
+	img.WritePixels(pix)
 	return img
 }
 
 func generateGlowLine(w, h int, clr color.NRGBA) *ebiten.Image {
-	img := ebiten.NewImage(w, h)
+	pix := make([]byte, w*h*4)
 	cy := float64(h) / 2
 	for y := 0; y < h; y++ {
-		dist := math.Abs(float64(y) - cy) / cy
+		dist := math.Abs(float64(y)-cy) / cy
 		alpha := uint8(float64(clr.A) * (1.0 - dist*dist))
+		// Premultiplied alpha
+		pr := uint8(float64(clr.R) * float64(alpha) / 255)
+		pg := uint8(float64(clr.G) * float64(alpha) / 255)
+		pb := uint8(float64(clr.B) * float64(alpha) / 255)
 		for x := 0; x < w; x++ {
-			img.Set(x, y, color.NRGBA{clr.R, clr.G, clr.B, alpha})
+			off := (y*w + x) * 4
+			pix[off] = pr
+			pix[off+1] = pg
+			pix[off+2] = pb
+			pix[off+3] = alpha
 		}
 	}
+	img := ebiten.NewImage(w, h)
+	img.WritePixels(pix)
 	return img
 }
 
 func generateFramePiece(size int) *ebiten.Image {
-	img := ebiten.NewImage(size, size)
+	pix := make([]byte, size*size*4)
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
 			if x < 2 || y < 2 || x >= size-2 || y >= size-2 {
-				// Outer border: light bevel
 				v := uint8(80)
 				if x < 1 || y < 1 {
-					v = 100 // highlight
+					v = 100
 				}
-				img.Set(x, y, color.NRGBA{v, v, uint8(float64(v) * 1.2), 255})
+				off := (y*size + x) * 4
+				pix[off] = v
+				pix[off+1] = v
+				pix[off+2] = uint8(math.Min(255, float64(v)*1.2))
+				pix[off+3] = 255
 			}
 		}
 	}
+	img := ebiten.NewImage(size, size)
+	img.WritePixels(pix)
 	return img
 }
 
@@ -691,24 +709,26 @@ func drawRivetAt(dst *ebiten.Image, rivet *ebiten.Image, x, y int) {
 }
 
 func drawBevelRect(dst *ebiten.Image, x, y, w, h int, highlight, shadow color.NRGBA) {
-	// Top + Left = highlight
-	for i := 0; i < w; i++ {
-		dst.Set(x+i, y, highlight)
-		dst.Set(x+i, y+1, color.NRGBA{highlight.R, highlight.G, highlight.B, highlight.A / 2})
-	}
-	for i := 0; i < h; i++ {
-		dst.Set(x, y+i, highlight)
-		dst.Set(x+1, y+i, color.NRGBA{highlight.R, highlight.G, highlight.B, highlight.A / 2})
-	}
-	// Bottom + Right = shadow
-	for i := 0; i < w; i++ {
-		dst.Set(x+i, y+h-1, shadow)
-		dst.Set(x+i, y+h-2, color.NRGBA{shadow.R, shadow.G, shadow.B, shadow.A / 2})
-	}
-	for i := 0; i < h; i++ {
-		dst.Set(x+w-1, y+i, shadow)
-		dst.Set(x+w-2, y+i, color.NRGBA{shadow.R, shadow.G, shadow.B, shadow.A / 2})
-	}
+	// Use vector drawing instead of per-pixel Set
+	hlClr := color.RGBA{highlight.R, highlight.G, highlight.B, highlight.A}
+	hlHalf := color.RGBA{highlight.R, highlight.G, highlight.B, highlight.A / 2}
+	shClr := color.RGBA{shadow.R, shadow.G, shadow.B, shadow.A}
+	shHalf := color.RGBA{shadow.R, shadow.G, shadow.B, shadow.A / 2}
+
+	fx, fy := float32(x), float32(y)
+	fw, fh := float32(w), float32(h)
+	// Top highlight
+	vector.DrawFilledRect(dst, fx, fy, fw, 1, hlClr, false)
+	vector.DrawFilledRect(dst, fx, fy+1, fw, 1, hlHalf, false)
+	// Left highlight
+	vector.DrawFilledRect(dst, fx, fy, 1, fh, hlClr, false)
+	vector.DrawFilledRect(dst, fx+1, fy, 1, fh, hlHalf, false)
+	// Bottom shadow
+	vector.DrawFilledRect(dst, fx, fy+fh-1, fw, 1, shClr, false)
+	vector.DrawFilledRect(dst, fx, fy+fh-2, fw, 1, shHalf, false)
+	// Right shadow
+	vector.DrawFilledRect(dst, fx+fw-1, fy, 1, fh, shClr, false)
+	vector.DrawFilledRect(dst, fx+fw-2, fy, 1, fh, shHalf, false)
 }
 
 func drawBevelBorder(dst *ebiten.Image, w, h int) {

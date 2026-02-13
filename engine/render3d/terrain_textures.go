@@ -3,7 +3,6 @@ package render3d
 import (
 	"fmt"
 	"image"
-	"image/color"
 	"image/png"
 	"math"
 	"os"
@@ -15,10 +14,20 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+// cachedBatch holds pre-computed vertices/indices for a texture batch
+type cachedBatch struct {
+	vertices []ebiten.Vertex
+	indices  []uint16
+	tex      *ebiten.Image
+}
+
 // TerrainTextureAtlas holds loaded terrain tile images grouped by type
 type TerrainTextureAtlas struct {
-	tiles   map[string][]*ebiten.Image // e.g. "grass" -> [grass_1, grass_2, ...]
-	loaded  bool
+	tiles    map[string][]*ebiten.Image // e.g. "grass" -> [grass_1, grass_2, ...]
+	loaded   bool
+	// Cached static terrain batches (rebuilt only when camera/viewport changes)
+	staticCache    []cachedBatch
+	staticCacheKey string // "minX,minY,maxX,maxY,sw,sh,vpHash"
 }
 
 // NewTerrainTextureAtlas creates a new atlas
@@ -155,10 +164,35 @@ func (ta *TerrainTextureAtlas) RenderTexturedTerrain(
 	sh := float64(cam.ScreenH)
 	vp := cam.ViewProj()
 
-	// First pass: render a base color fill to eliminate gaps between textured tiles
-	ta.renderBaseColorFill(screen, cam, tm, minX, minY, maxX, maxY, vp, sw, sh)
+	// Cache key based on viewport and camera state
+	cacheKey := fmt.Sprintf("%d,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d",
+		minX, minY, maxX, maxY, cam.TargetX, cam.TargetY, cam.Zoom, cam.Pitch, cam.Yaw, cam.ScreenW, cam.ScreenH)
 
-	// Group tiles by texture for batched rendering
+	// Rebuild static cache if viewport changed
+	if ta.staticCacheKey != cacheKey {
+		ta.rebuildStaticCache(cam, tm, minX, minY, maxX, maxY, vp, sw, sh)
+		ta.staticCacheKey = cacheKey
+	}
+
+	// Draw cached static terrain
+	for _, batch := range ta.staticCache {
+		if len(batch.vertices) > 0 {
+			op := &ebiten.DrawTrianglesOptions{}
+			op.AntiAlias = false
+			screen.DrawTriangles(batch.vertices, batch.indices, batch.tex, op)
+		}
+	}
+
+	// Draw animated water tiles (rebuilt every frame)
+	ta.renderWaterTiles(screen, cam, tm, minX, minY, maxX, maxY, vp, sw, sh, time)
+}
+
+// rebuildStaticCache builds cached vertex batches for non-water terrain
+func (ta *TerrainTextureAtlas) rebuildStaticCache(
+	cam *Camera3D, tm *maplib.TileMap,
+	minX, minY, maxX, maxY int,
+	vp Mat4, sw, sh float64,
+) {
 	type tileBatch struct {
 		vertices []ebiten.Vertex
 		indices  []uint16
@@ -168,40 +202,22 @@ func (ta *TerrainTextureAtlas) RenderTexturedTerrain(
 	for y := minY; y <= maxY; y++ {
 		for x := minX; x <= maxX; x++ {
 			tile := tm.At(x, y)
-			if tile == nil {
+			if tile == nil || tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
 				continue
 			}
 
-			var tex *ebiten.Image
-			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
-				tex = ta.GetWaterTile(x, y, time)
-			} else {
-				tex = ta.GetTile(tile.Terrain, x, y)
-			}
+			tex := ta.GetTile(tile.Terrain, x, y)
 			if tex == nil {
 				continue
 			}
 
-			// Height for this tile
 			h := float64(tile.Height) * 0.15
-
-			// Project 4 corners of the tile with slight overlap to avoid gaps
 			fx, fz := float64(x), float64(y)
-			const pad = 0.015 // slight overlap to fully cover base fill
 
-			// For water, add slight wave
-			h0, h1, h2, h3 := h, h, h, h
-			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
-				h0 = -0.05 + 0.03*math.Sin(time*2.0+fx*0.5+fz*0.7)
-				h1 = -0.05 + 0.03*math.Sin(time*2.0+(fx+1)*0.5+fz*0.7)
-				h2 = -0.05 + 0.03*math.Sin(time*2.0+(fx+1)*0.5+(fz+1)*0.7)
-				h3 = -0.05 + 0.03*math.Sin(time*2.0+fx*0.5+(fz+1)*0.7)
-			}
-
-			p0 := vp.TransformPoint(V3(fx-pad, h0, fz-pad))
-			p1 := vp.TransformPoint(V3(fx+1+pad, h1, fz-pad))
-			p2 := vp.TransformPoint(V3(fx+1+pad, h2, fz+1+pad))
-			p3 := vp.TransformPoint(V3(fx-pad, h3, fz+1+pad))
+			p0 := vp.TransformPoint(V3(fx, h, fz))
+			p1 := vp.TransformPoint(V3(fx+1, h, fz))
+			p2 := vp.TransformPoint(V3(fx+1, h, fz+1))
+			p3 := vp.TransformPoint(V3(fx, h, fz+1))
 
 			s0x := float32((p0.X*0.5 + 0.5) * sw)
 			s0y := float32((1 - (p0.Y*0.5 + 0.5)) * sh)
@@ -213,44 +229,26 @@ func (ta *TerrainTextureAtlas) RenderTexturedTerrain(
 			s3y := float32((1 - (p3.Y*0.5 + 0.5)) * sh)
 
 			// Frustum cull
-			if s0x < -200 && s1x < -200 && s2x < -200 && s3x < -200 {
-				continue
-			}
-			if s0x > float32(sw)+200 && s1x > float32(sw)+200 && s2x > float32(sw)+200 && s3x > float32(sw)+200 {
-				continue
-			}
-			if s0y < -200 && s1y < -200 && s2y < -200 && s3y < -200 {
-				continue
-			}
-			if s0y > float32(sh)+200 && s1y > float32(sh)+200 && s2y > float32(sh)+200 && s3y > float32(sh)+200 {
+			if (s0x < -200 && s1x < -200 && s2x < -200 && s3x < -200) ||
+				(s0x > float32(sw)+200 && s1x > float32(sw)+200 && s2x > float32(sw)+200 && s3x > float32(sw)+200) ||
+				(s0y < -200 && s1y < -200 && s2y < -200 && s3y < -200) ||
+				(s0y > float32(sh)+200 && s1y > float32(sh)+200 && s2y > float32(sh)+200 && s3y > float32(sh)+200) {
 				continue
 			}
 
 			texW := float32(tex.Bounds().Dx())
 			texH := float32(tex.Bounds().Dy())
 
-			// Color tint (white = no tint, can add lighting)
 			cr, cg, cb := float32(1.0), float32(1.0), float32(1.0)
-
-			// Slight per-tile color variation for natural look
 			hash := uint32(x*7919 + y*7927)
-			variation := float32(hash%100) / 100.0 * 0.06 - 0.03
+			variation := float32(hash%100)/100.0*0.06 - 0.03
 			cr += variation
 			cg += variation
 			cb += variation
 
-			// Water tint effect
-			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
-				spec := float32(0.1 * math.Abs(math.Sin(time*1.8+float64(x)*0.4)))
-				cb += spec * 0.3
-				cg += spec * 0.1
-			}
-
-			// Ore sparkle overlay
 			if tile.OreAmount > 0 && tile.Terrain != maplib.TerrainOre {
-				sparkle := float32(0.1 * math.Abs(math.Sin(time*3+float64(x*7+y*13))))
-				cr += sparkle * 0.3
-				cg += sparkle * 0.2
+				cr += 0.15
+				cg += 0.10
 			}
 
 			batch, ok := batches[tex]
@@ -267,19 +265,98 @@ func (ta *TerrainTextureAtlas) RenderTexturedTerrain(
 				ebiten.Vertex{DstX: s3x, DstY: s3y, SrcX: 0, SrcY: texH, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
 			)
 			batch.indices = append(batch.indices, base, base+1, base+2, base, base+2, base+3)
-
-			// Flush if approaching uint16 limit
-			if len(batch.vertices) >= 64000 {
-				op := &ebiten.DrawTrianglesOptions{}
-				op.AntiAlias = false
-				screen.DrawTriangles(batch.vertices, batch.indices, tex, op)
-				batch.vertices = batch.vertices[:0]
-				batch.indices = batch.indices[:0]
-			}
 		}
 	}
 
-	// Flush all batches
+	ta.staticCache = ta.staticCache[:0]
+	for tex, batch := range batches {
+		ta.staticCache = append(ta.staticCache, cachedBatch{
+			vertices: batch.vertices,
+			indices:  batch.indices,
+			tex:      tex,
+		})
+	}
+}
+
+// renderWaterTiles draws animated water tiles each frame
+func (ta *TerrainTextureAtlas) renderWaterTiles(
+	screen *ebiten.Image, cam *Camera3D, tm *maplib.TileMap,
+	minX, minY, maxX, maxY int,
+	vp Mat4, sw, sh float64, time float64,
+) {
+	type tileBatch struct {
+		vertices []ebiten.Vertex
+		indices  []uint16
+	}
+	batches := make(map[*ebiten.Image]*tileBatch)
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			tile := tm.At(x, y)
+			if tile == nil {
+				continue
+			}
+			if tile.Terrain != maplib.TerrainWater && tile.Terrain != maplib.TerrainDeepWater {
+				continue
+			}
+
+			tex := ta.GetWaterTile(x, y, time)
+			if tex == nil {
+				continue
+			}
+
+			fx, fz := float64(x), float64(y)
+			h0 := -0.05 + 0.03*math.Sin(time*2.0+fx*0.5+fz*0.7)
+			h1 := -0.05 + 0.03*math.Sin(time*2.0+(fx+1)*0.5+fz*0.7)
+			h2 := -0.05 + 0.03*math.Sin(time*2.0+(fx+1)*0.5+(fz+1)*0.7)
+			h3 := -0.05 + 0.03*math.Sin(time*2.0+fx*0.5+(fz+1)*0.7)
+
+			p0 := vp.TransformPoint(V3(fx, h0, fz))
+			p1 := vp.TransformPoint(V3(fx+1, h1, fz))
+			p2 := vp.TransformPoint(V3(fx+1, h2, fz+1))
+			p3 := vp.TransformPoint(V3(fx, h3, fz+1))
+
+			s0x := float32((p0.X*0.5 + 0.5) * sw)
+			s0y := float32((1 - (p0.Y*0.5 + 0.5)) * sh)
+			s1x := float32((p1.X*0.5 + 0.5) * sw)
+			s1y := float32((1 - (p1.Y*0.5 + 0.5)) * sh)
+			s2x := float32((p2.X*0.5 + 0.5) * sw)
+			s2y := float32((1 - (p2.Y*0.5 + 0.5)) * sh)
+			s3x := float32((p3.X*0.5 + 0.5) * sw)
+			s3y := float32((1 - (p3.Y*0.5 + 0.5)) * sh)
+
+			if (s0x < -200 && s1x < -200 && s2x < -200 && s3x < -200) ||
+				(s0x > float32(sw)+200 && s1x > float32(sw)+200 && s2x > float32(sw)+200 && s3x > float32(sw)+200) ||
+				(s0y < -200 && s1y < -200 && s2y < -200 && s3y < -200) ||
+				(s0y > float32(sh)+200 && s1y > float32(sh)+200 && s2y > float32(sh)+200 && s3y > float32(sh)+200) {
+				continue
+			}
+
+			texW := float32(tex.Bounds().Dx())
+			texH := float32(tex.Bounds().Dy())
+
+			cr, cg, cb := float32(1.0), float32(1.0), float32(1.0)
+			spec := float32(0.1 * math.Abs(math.Sin(time*1.8+float64(x)*0.4)))
+			cb += spec * 0.3
+			cg += spec * 0.1
+
+			batch, ok := batches[tex]
+			if !ok {
+				batch = &tileBatch{}
+				batches[tex] = batch
+			}
+
+			base := uint16(len(batch.vertices))
+			batch.vertices = append(batch.vertices,
+				ebiten.Vertex{DstX: s0x, DstY: s0y, SrcX: 0, SrcY: 0, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
+				ebiten.Vertex{DstX: s1x, DstY: s1y, SrcX: texW, SrcY: 0, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
+				ebiten.Vertex{DstX: s2x, DstY: s2y, SrcX: texW, SrcY: texH, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
+				ebiten.Vertex{DstX: s3x, DstY: s3y, SrcX: 0, SrcY: texH, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
+			)
+			batch.indices = append(batch.indices, base, base+1, base+2, base, base+2, base+3)
+		}
+	}
+
 	for tex, batch := range batches {
 		if len(batch.vertices) > 0 {
 			op := &ebiten.DrawTrianglesOptions{}
@@ -372,75 +449,6 @@ func (ta *TerrainTextureAtlas) RenderTreeBillboards(
 		op.ColorScale.Scale(0.7, 1.1, 0.6, 1.0)
 		screen.DrawImage(treeTex, op)
 		_ = trunkW
-	}
-}
-
-// renderBaseColorFill draws a solid color underneath each tile to prevent gap artifacts
-func (ta *TerrainTextureAtlas) renderBaseColorFill(
-	screen *ebiten.Image,
-	cam *Camera3D,
-	tm *maplib.TileMap,
-	minX, minY, maxX, maxY int,
-	vp Mat4,
-	sw, sh float64,
-) {
-	// Use a small white image for vertex-colored triangles
-	whiteImg := ebiten.NewImage(2, 2)
-	whiteImg.Fill(color.White)
-
-	var vertices []ebiten.Vertex
-	var indices []uint16
-
-	for y := minY; y <= maxY; y++ {
-		for x := minX; x <= maxX; x++ {
-			tile := tm.At(x, y)
-			if tile == nil {
-				continue
-			}
-
-			h := float64(tile.Height) * 0.15
-			fx, fz := float64(x), float64(y)
-
-			p0 := vp.TransformPoint(V3(fx, h, fz))
-			p1 := vp.TransformPoint(V3(fx+1, h, fz))
-			p2 := vp.TransformPoint(V3(fx+1, h, fz+1))
-			p3 := vp.TransformPoint(V3(fx, h, fz+1))
-
-			s0x := float32((p0.X*0.5 + 0.5) * sw)
-			s0y := float32((1 - (p0.Y*0.5 + 0.5)) * sh)
-			s1x := float32((p1.X*0.5 + 0.5) * sw)
-			s1y := float32((1 - (p1.Y*0.5 + 0.5)) * sh)
-			s2x := float32((p2.X*0.5 + 0.5) * sw)
-			s2y := float32((1 - (p2.Y*0.5 + 0.5)) * sh)
-			s3x := float32((p3.X*0.5 + 0.5) * sw)
-			s3y := float32((1 - (p3.Y*0.5 + 0.5)) * sh)
-
-			// Base color from terrain type (darkened to serve as gap fill)
-			bc, ok := TerrainBaseColors[tile.Terrain]
-			if !ok {
-				bc = Color3{0.3, 0.5, 0.2}
-			}
-			cr, cg, cb := float32(bc.R*0.7), float32(bc.G*0.7), float32(bc.B*0.7)
-
-			base := uint16(len(vertices))
-			vertices = append(vertices,
-				ebiten.Vertex{DstX: s0x, DstY: s0y, SrcX: 0, SrcY: 0, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
-				ebiten.Vertex{DstX: s1x, DstY: s1y, SrcX: 1, SrcY: 0, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
-				ebiten.Vertex{DstX: s2x, DstY: s2y, SrcX: 1, SrcY: 1, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
-				ebiten.Vertex{DstX: s3x, DstY: s3y, SrcX: 0, SrcY: 1, ColorR: cr, ColorG: cg, ColorB: cb, ColorA: 1},
-			)
-			indices = append(indices, base, base+1, base+2, base, base+2, base+3)
-
-			if len(vertices) >= 64000 {
-				screen.DrawTriangles(vertices, indices, whiteImg, nil)
-				vertices = vertices[:0]
-				indices = indices[:0]
-			}
-		}
-	}
-
-	if len(vertices) > 0 {
-		screen.DrawTriangles(vertices, indices, whiteImg, nil)
 	}
 }
 
