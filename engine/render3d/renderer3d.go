@@ -17,6 +17,7 @@ type Renderer3D struct {
 	Camera    *Camera3D
 	Lighting  LightingSetup
 	Particles *ParticleSystem
+	Sprites   *SpriteAtlas // RA2-style sprite billboards (optional)
 
 	// Internal
 	whiteImg *ebiten.Image
@@ -41,6 +42,7 @@ func NewRenderer3D(screenW, screenH int) *Renderer3D {
 		Camera:         NewCamera3D(screenW, screenH),
 		Lighting:       DefaultLighting(),
 		Particles:      NewParticleSystem(),
+		Sprites:        NewSpriteAtlas(),
 		buildingModels: make(map[string]*Mesh3D),
 		unitModels:     make(map[string]*Mesh3D),
 	}
@@ -48,6 +50,11 @@ func NewRenderer3D(screenW, screenH int) *Renderer3D {
 	// 1x1 white image for colored triangle rendering
 	r.whiteImg = ebiten.NewImage(4, 4)
 	r.whiteImg.Fill(color.White)
+
+	// Try to load RA2-style sprites
+	if assetsPath := FindAssetsPath(); assetsPath != "" {
+		r.Sprites.LoadFromDirectory(assetsPath)
+	}
 
 	return r
 }
@@ -114,6 +121,12 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 	var entities []entityDraw
 
 	// Buildings
+	type spriteDraw struct {
+		sprite *ebiten.Image
+		wx, wy, wz, scale, depth float64
+	}
+	var spriteDraws []spriteDraw
+
 	for _, id := range world.Query(core.CompBuilding, core.CompPosition, core.CompOwner) {
 		pos := world.Get(id, core.CompPosition).(*core.Position)
 		own := world.Get(id, core.CompOwner).(*core.Owner)
@@ -124,23 +137,34 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 			buildingKey = bn.(*core.BuildingName).Key
 		}
 
+		cx := pos.X + float64(bldg.SizeX)/2.0
+		cz := pos.Y + float64(bldg.SizeY)/2.0
+
+		// Try sprite billboard first
+		if r.Sprites.IsLoaded() {
+			if spr := r.Sprites.GetBuildingSprite(buildingKey, own.Faction); spr != nil {
+				_, _, depth := r.Camera.Project3DToScreen(cx, 0, cz)
+				spriteDraws = append(spriteDraws, spriteDraw{
+					sprite: spr, wx: cx, wy: 0.1, wz: cz,
+					scale: float64(bldg.SizeX) * 1.2, depth: depth,
+				})
+				continue
+			}
+		}
+
+		// Fallback: 3D mesh
 		mesh := r.getBuildingMesh(buildingKey, own.Faction)
 		if mesh == nil {
-			// Fallback: generic box
 			fc := FactionColor(own.Faction)
 			mesh = MakeBox(float64(bldg.SizeX)*0.8, 0.8, float64(bldg.SizeY)*0.8, fc)
 		}
 
-		// Position the building
-		cx := pos.X + float64(bldg.SizeX)/2.0
-		cz := pos.Y + float64(bldg.SizeY)/2.0
 		placed := mesh.Transform(Mat4Translate(cx, 0, cz))
 
 		// Damage tint
 		if h := world.Get(id, core.CompHealth); h != nil {
 			hp := h.(*core.Health)
 			if hp.Ratio() < 0.5 {
-				// Darken damaged buildings
 				for i := range placed.Triangles {
 					for j := 0; j < 3; j++ {
 						c := &placed.Triangles[i].V[j].Color
@@ -164,6 +188,19 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 		pos := world.Get(id, core.CompPosition).(*core.Position)
 		own := world.Get(id, core.CompOwner).(*core.Owner)
 
+		// Try sprite billboard for units
+		if r.Sprites.IsLoaded() {
+			unitType := r.getUnitType(world, id)
+			if spr := r.Sprites.GetUnitSprite(unitType, own.Faction); spr != nil {
+				_, _, depth := r.Camera.Project3DToScreen(pos.X, pos.Z, pos.Y)
+				spriteDraws = append(spriteDraws, spriteDraw{
+					sprite: spr, wx: pos.X, wy: pos.Z + 0.1, wz: pos.Y,
+					scale: 1.0, depth: depth,
+				})
+				continue
+			}
+		}
+
 		mesh := r.getUnitMesh(world, id, own.Faction)
 		if mesh == nil {
 			continue
@@ -184,6 +221,14 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 
 	for _, e := range entities {
 		r.renderMesh(screen, e.mesh)
+	}
+
+	// Draw sprite billboards (sorted by depth, back-to-front)
+	sort.Slice(spriteDraws, func(i, j int) bool {
+		return spriteDraws[i].depth > spriteDraws[j].depth
+	})
+	for _, sd := range spriteDraws {
+		r.Sprites.DrawBillboard(screen, r.Camera, sd.sprite, sd.wx, sd.wy, sd.wz, sd.scale)
 	}
 
 	// 3. Projectiles
@@ -221,6 +266,21 @@ func (r *Renderer3D) getBuildingMesh(key, faction string) *Mesh3D {
 	}
 	r.buildingModels[cacheKey] = m
 	return m
+}
+
+func (r *Renderer3D) getUnitType(world *core.World, id core.EntityID) string {
+	if world.Has(id, core.CompMCV) {
+		return "mcv"
+	} else if world.Has(id, core.CompHarvester) {
+		return "harvester"
+	} else if world.Has(id, core.CompWeapon) {
+		spr := world.Get(id, core.CompSprite)
+		if spr != nil && spr.(*core.Sprite).Width > 26 {
+			return "tank"
+		}
+		return "infantry"
+	}
+	return "infantry"
 }
 
 func (r *Renderer3D) getUnitMesh(world *core.World, id core.EntityID, faction string) *Mesh3D {

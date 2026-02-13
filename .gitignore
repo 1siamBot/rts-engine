@@ -12,6 +12,7 @@
 .vscode/
 Thumbs.db
 assets/downloads/
+assets/ra2/raw/
 rts-editor
 rts-game
 vendor/
