@@ -287,8 +287,17 @@ func (g *Game) Update() error {
 
 	// Handle right click
 	if g.input.RightJustPressed {
-		if g.hud.Placement.Active {
+		// Cancel repair/sell mode
+		if g.hud.RepairMode || g.hud.SellMode {
+			g.hud.RepairMode = false
+			g.hud.SellMode = false
+		} else if g.hud.Placement.Active {
 			g.cancelPlacementWithRefund()
+		} else if g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) && g.hud.ActiveTab == ui.TabUnits {
+			// Right-click on unit cameo: cancel production
+			if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); uKey != "" {
+				g.cancelUnitProduction(uKey)
+			}
 		} else if !g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
 			gx, gy := int(math.Floor(wx)), int(math.Floor(wy))
 			w := g.gameLoop.World
@@ -311,9 +320,13 @@ func (g *Game) Update() error {
 			g.renderer.Camera.CenterOn(wmx, wmy)
 		} else if g.hud.HandleClick(g.input.MouseX, g.input.MouseY) {
 			// Tab or command button click handled
+		} else if g.hud.RepairMode && !g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
+			g.tryStartRepair(wx, wy)
+		} else if g.hud.SellMode && !g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
+			g.trySellBuildingAtPos(wx, wy)
 		} else if bKey := g.hud.GetSidebarBuildingClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); bKey != "" {
 			g.startBuildingPurchase(bKey)
-		} else if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY); uKey != "" {
+		} else if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); uKey != "" {
 			g.queueUnit(uKey)
 		} else if g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
 			// Click in sidebar but not on any button — consume to avoid selecting behind
@@ -329,6 +342,18 @@ func (g *Game) Update() error {
 
 	if g.input.IsKeyJustPressed(ebiten.KeyQ) {
 		g.queueUnit("gi")
+	}
+
+	// Repair active building
+	if g.hud.RepairTargetID != 0 {
+		w := g.gameLoop.World
+		if w.Has(g.hud.RepairTargetID, core.CompHealth) {
+			if !systems.RepairBuilding(w, g.hud.RepairTargetID, g.players, 1.0/60.0) {
+				g.hud.RepairTargetID = 0 // repair done or can't afford
+			}
+		} else {
+			g.hud.RepairTargetID = 0
+		}
 	}
 
 	g.audioMgr.SetCameraPos(g.renderer.Camera.TargetX, g.renderer.Camera.TargetY)
@@ -512,6 +537,77 @@ func (g *Game) queueUnit(unitType string) {
 	prod := w.Get(bid, core.CompProduction).(*core.Production)
 	player.Credits -= udef.Cost
 	prod.Queue = append(prod.Queue, unitType)
+}
+
+func (g *Game) tryStartRepair(wx, wy float64) {
+	w := g.gameLoop.World
+	// Find building near click
+	for _, id := range w.Query(core.CompBuilding, core.CompOwner, core.CompPosition, core.CompHealth) {
+		own := w.Get(id, core.CompOwner).(*core.Owner)
+		if own.PlayerID != 0 {
+			continue
+		}
+		pos := w.Get(id, core.CompPosition).(*core.Position)
+		sx, sy := g.renderer.Camera.WorldToScreen(pos.X, pos.Y)
+		dx := float64(g.input.MouseX - sx)
+		dy := float64(g.input.MouseY - sy)
+		if math.Sqrt(dx*dx+dy*dy) < 30 {
+			health := w.Get(id, core.CompHealth).(*core.Health)
+			if health.Current < health.Max {
+				g.hud.RepairTargetID = id
+				g.hud.ShowMessage("Repairing...", 1.0)
+			} else {
+				g.hud.ShowMessage("Building at full health", 1.5)
+			}
+			g.hud.RepairMode = false
+			return
+		}
+	}
+	g.hud.ShowMessage("Click on a damaged building", 1.5)
+}
+
+func (g *Game) trySellBuildingAtPos(wx, wy float64) {
+	w := g.gameLoop.World
+	for _, id := range w.Query(core.CompBuilding, core.CompOwner, core.CompPosition) {
+		own := w.Get(id, core.CompOwner).(*core.Owner)
+		if own.PlayerID != 0 {
+			continue
+		}
+		pos := w.Get(id, core.CompPosition).(*core.Position)
+		bldg := w.Get(id, core.CompBuilding).(*core.Building)
+		sx, sy := g.renderer.Camera.WorldToScreen(pos.X, pos.Y)
+		dx := float64(g.input.MouseX - sx)
+		dy := float64(g.input.MouseY - sy)
+		if math.Sqrt(dx*dx+dy*dy) < 30 && bldg.Sellable {
+			g.hud.AddEffect(pos.X, pos.Y, "explosion", 15)
+			g.renderer.Particles.AddExplosion(pos.X, pos.Y)
+			systems.FreeTiles(g.tileMap, int(pos.X), int(pos.Y), bldg.SizeX, bldg.SizeY)
+			systems.SellBuilding(w, id, g.techTree, g.players)
+			g.hud.SellMode = false
+			g.hud.ShowMessage("Building sold!", 1.5)
+			return
+		}
+	}
+	g.hud.ShowMessage("Click on a building to sell", 1.5)
+}
+
+func (g *Game) cancelUnitProduction(unitKey string) {
+	w := g.gameLoop.World
+	// Find a production building with this unit in queue
+	for _, bid := range w.Query(core.CompProduction, core.CompOwner, core.CompBuildingName) {
+		own := w.Get(bid, core.CompOwner).(*core.Owner)
+		if own.PlayerID != 0 {
+			continue
+		}
+		prod := w.Get(bid, core.CompProduction).(*core.Production)
+		for _, qk := range prod.Queue {
+			if qk == unitKey {
+				systems.CancelUnitProduction(w, g.techTree, bid, g.players)
+				g.hud.ShowMessage("Production cancelled", 1.0)
+				return
+			}
+		}
+	}
 }
 
 func (g *Game) handleSelection(wx, wy float64, shift bool) {

@@ -35,6 +35,7 @@ type BuildingDef struct {
 	Prereqs   []string
 	CanProduce []string
 	Faction   string
+	IsDefense bool
 }
 
 // TechTree holds all definitions
@@ -52,7 +53,10 @@ func NewTechTree() *TechTree {
 
 	// Allied units
 	tt.Units["gi"] = &UnitDef{Name: "GI", Cost: 200, BuildTime: 3, HP: 125, Speed: 3.0, Damage: 15, Range: 5, ArmorType: core.ArmorLight, DmgType: core.DmgKinetic, MoveType: core.MoveInfantry, Vision: 5, Faction: "Allied"}
+	tt.Units["engineer"] = &UnitDef{Name: "Engineer", Cost: 500, BuildTime: 5, HP: 75, Speed: 2.5, Damage: 0, Range: 0, ArmorType: core.ArmorNone, MoveType: core.MoveInfantry, Vision: 4, Faction: ""}
+	tt.Units["attack_dog"] = &UnitDef{Name: "Attack Dog", Cost: 200, BuildTime: 2, HP: 100, Speed: 5.0, Damage: 100, Range: 1, ArmorType: core.ArmorNone, DmgType: core.DmgKinetic, MoveType: core.MoveInfantry, Vision: 7, Faction: ""}
 	tt.Units["grizzly"] = &UnitDef{Name: "Grizzly Tank", Cost: 700, BuildTime: 8, HP: 400, Speed: 2.5, Damage: 75, Range: 5.5, ArmorType: core.ArmorHeavy, DmgType: core.DmgExplosive, MoveType: core.MoveVehicle, Vision: 6, Faction: "Allied", Prereqs: []string{"war_factory"}}
+	tt.Units["ifv"] = &UnitDef{Name: "IFV", Cost: 600, BuildTime: 6, HP: 200, Speed: 3.5, Damage: 40, Range: 6, ArmorType: core.ArmorLight, DmgType: core.DmgKinetic, MoveType: core.MoveVehicle, Vision: 7, Faction: "Allied", Prereqs: []string{"war_factory"}}
 	tt.Units["harvester_a"] = &UnitDef{Name: "Chrono Miner", Cost: 1400, BuildTime: 12, HP: 600, Speed: 1.5, MoveType: core.MoveVehicle, Vision: 4, Faction: "Allied"}
 
 	// Soviet units
@@ -63,10 +67,16 @@ func NewTechTree() *TechTree {
 
 	// Buildings (shared names, faction handled by Faction field)
 	tt.Buildings["construction_yard"] = &BuildingDef{Name: "Construction Yard", Cost: 0, BuildTime: 0, HP: 1000, SizeX: 3, SizeY: 3, PowerGen: 0, PowerDraw: 0, TechLevel: 0, Faction: ""}
-	tt.Buildings["power_plant"] = &BuildingDef{Name: "Power Plant", Cost: 800, BuildTime: 10, HP: 750, SizeX: 2, SizeY: 2, PowerGen: 100, PowerDraw: 0, TechLevel: 0, Prereqs: []string{"construction_yard"}, Faction: ""}
-	tt.Buildings["barracks"] = &BuildingDef{Name: "Barracks", Cost: 500, BuildTime: 8, HP: 500, SizeX: 2, SizeY: 2, PowerDraw: 20, TechLevel: 0, CanProduce: []string{"gi", "conscript"}, Prereqs: []string{"power_plant"}, Faction: ""}
-	tt.Buildings["refinery"] = &BuildingDef{Name: "Ore Refinery", Cost: 2000, BuildTime: 15, HP: 900, SizeX: 3, SizeY: 3, PowerDraw: 30, TechLevel: 0, Prereqs: []string{"power_plant"}, Faction: ""}
-	tt.Buildings["war_factory"] = &BuildingDef{Name: "War Factory", Cost: 2000, BuildTime: 15, HP: 1000, SizeX: 3, SizeY: 3, PowerDraw: 50, TechLevel: 1, CanProduce: []string{"grizzly", "rhino", "harvester_a", "harvester_s", "mcv"}, Prereqs: []string{"refinery"}, Faction: ""}
+	tt.Buildings["power_plant"] = &BuildingDef{Name: "Power Plant", Cost: 800, BuildTime: 15, HP: 750, SizeX: 2, SizeY: 2, PowerGen: 100, PowerDraw: 0, TechLevel: 0, Prereqs: []string{"construction_yard"}, Faction: ""}
+	tt.Buildings["barracks"] = &BuildingDef{Name: "Barracks", Cost: 500, BuildTime: 20, HP: 500, SizeX: 2, SizeY: 2, PowerDraw: 20, TechLevel: 0, CanProduce: []string{"gi", "conscript", "engineer", "attack_dog"}, Prereqs: []string{"power_plant"}, Faction: ""}
+	tt.Buildings["refinery"] = &BuildingDef{Name: "Ore Refinery", Cost: 2000, BuildTime: 25, HP: 900, SizeX: 3, SizeY: 3, PowerDraw: 30, TechLevel: 0, Prereqs: []string{"power_plant"}, Faction: ""}
+	tt.Buildings["war_factory"] = &BuildingDef{Name: "War Factory", Cost: 2000, BuildTime: 30, HP: 1000, SizeX: 3, SizeY: 3, PowerDraw: 50, TechLevel: 1, CanProduce: []string{"grizzly", "rhino", "ifv", "harvester_a", "harvester_s", "mcv"}, Prereqs: []string{"refinery"}, Faction: ""}
+	tt.Buildings["radar"] = &BuildingDef{Name: "Radar", Cost: 1000, BuildTime: 20, HP: 500, SizeX: 2, SizeY: 2, PowerDraw: 40, TechLevel: 2, Prereqs: []string{"war_factory"}, Faction: ""}
+
+	// Defense buildings
+	tt.Buildings["pillbox"] = &BuildingDef{Name: "Pillbox", Cost: 500, BuildTime: 10, HP: 400, SizeX: 1, SizeY: 1, PowerDraw: 0, TechLevel: 0, Prereqs: []string{"barracks"}, Faction: "", IsDefense: true}
+	tt.Buildings["prism_tower"] = &BuildingDef{Name: "Prism Tower", Cost: 1500, BuildTime: 20, HP: 600, SizeX: 1, SizeY: 1, PowerDraw: 75, TechLevel: 2, Prereqs: []string{"radar"}, Faction: "Allied", IsDefense: true}
+	tt.Buildings["wall"] = &BuildingDef{Name: "Wall", Cost: 100, BuildTime: 3, HP: 200, SizeX: 1, SizeY: 1, PowerDraw: 0, TechLevel: 0, Prereqs: []string{"barracks"}, Faction: "", IsDefense: true}
 
 	return tt
 }
@@ -446,6 +456,104 @@ func FreeTiles(tm TileMapOccupy, tileX, tileY, sizeX, sizeY int) {
 // TileMapOccupy interface for marking tiles
 type TileMapOccupy interface {
 	SetOccupied(x, y int, occupied bool)
+}
+
+// BuildingKeyOrder returns building keys in a stable order for sidebar display
+func (tt *TechTree) BuildingKeyOrder() []string {
+	order := []string{"power_plant", "barracks", "refinery", "war_factory", "radar"}
+	var result []string
+	for _, k := range order {
+		if _, ok := tt.Buildings[k]; ok {
+			result = append(result, k)
+		}
+	}
+	return result
+}
+
+// DefenseKeyOrder returns defense building keys in a stable order
+func (tt *TechTree) DefenseKeyOrder() []string {
+	order := []string{"pillbox", "prism_tower", "wall"}
+	var result []string
+	for _, k := range order {
+		if _, ok := tt.Buildings[k]; ok {
+			result = append(result, k)
+		}
+	}
+	return result
+}
+
+// UnitKeyOrder returns unit keys in a stable order for sidebar display
+func (tt *TechTree) UnitKeyOrder() []string {
+	order := []string{"gi", "conscript", "engineer", "attack_dog", "grizzly", "rhino", "ifv", "harvester_a", "harvester_s", "mcv"}
+	var result []string
+	for _, k := range order {
+		if _, ok := tt.Units[k]; ok {
+			result = append(result, k)
+		}
+	}
+	return result
+}
+
+// RepairBuilding repairs a building, costing credits over time. Returns false if can't repair.
+func RepairBuilding(w *core.World, id core.EntityID, pm *core.PlayerManager, dt float64) bool {
+	hp := w.Get(id, core.CompHealth)
+	own := w.Get(id, core.CompOwner)
+	if hp == nil || own == nil {
+		return false
+	}
+	health := hp.(*core.Health)
+	if health.Current >= health.Max {
+		return false // fully repaired
+	}
+	o := own.(*core.Owner)
+	player := pm.GetPlayer(o.PlayerID)
+	if player == nil || player.Credits <= 0 {
+		return false
+	}
+	// Repair rate: ~5% HP per second, costs proportional
+	repairRate := float64(health.Max) * 0.05 * dt
+	costRate := 2.0 * dt // $2 per second approx
+	if float64(player.Credits) < costRate {
+		return false
+	}
+	player.Credits -= int(costRate)
+	if player.Credits < 0 {
+		player.Credits = 0
+	}
+	health.Current += int(repairRate)
+	if health.Current > health.Max {
+		health.Current = health.Max
+	}
+	return true
+}
+
+// CancelUnitProduction cancels the first unit in queue, refunding based on progress
+func CancelUnitProduction(w *core.World, tt *TechTree, buildingID core.EntityID, pm *core.PlayerManager) {
+	prod := w.Get(buildingID, core.CompProduction)
+	own := w.Get(buildingID, core.CompOwner)
+	if prod == nil || own == nil {
+		return
+	}
+	p := prod.(*core.Production)
+	o := own.(*core.Owner)
+	if len(p.Queue) == 0 {
+		return
+	}
+	unitKey := p.Queue[0]
+	udef, ok := tt.Units[unitKey]
+	if !ok {
+		p.Queue = p.Queue[1:]
+		p.Progress = 0
+		return
+	}
+	// Refund based on remaining progress
+	refund := int(float64(udef.Cost) * (1.0 - p.Progress))
+	player := pm.GetPlayer(o.PlayerID)
+	if player != nil {
+		player.Credits += refund
+	}
+	p.Queue = p.Queue[1:]
+	p.Progress = 0
 }
 
 // SellBuilding sells a building for 50% of its cost
