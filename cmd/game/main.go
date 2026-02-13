@@ -117,7 +117,7 @@ func NewGame() *Game {
 	w.AddSystem(&systems.GameOverSystem{Players: g.players})
 	w.AddSystem(&ai.AISystem{
 		Controllers: []*ai.AIController{
-			ai.NewAIController(1, ai.DiffMedium, g.techTree, g.navGrid),
+			ai.NewAIController(1, ai.DiffMedium, g.techTree, g.navGrid, g.tileMap),
 		},
 		Players: g.players,
 	})
@@ -182,110 +182,32 @@ func NewGame() *Game {
 func (g *Game) spawnInitialEntities() {
 	w := g.gameLoop.World
 
-	// Player 0: Construction Yard
-	cyID := w.Spawn()
-	w.Attach(cyID, &core.Position{X: 10, Y: 10})
-	w.Attach(cyID, &core.Health{Current: 1000, Max: 1000})
-	w.Attach(cyID, &core.Building{SizeX: 3, SizeY: 3, PowerGen: 0, IsConYard: true, Sellable: true})
-	w.Attach(cyID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 13, Y: 13}})
-	w.Attach(cyID, &core.Owner{PlayerID: 0, Faction: "Allied"})
-	w.Attach(cyID, &core.FogVision{Range: 8})
-	w.Attach(cyID, &core.Selectable{Radius: 1.5})
-	w.Attach(cyID, &core.BuildingName{Key: "construction_yard"})
+	// ---- Player 0: MCV only (authentic RA2 start) ----
+	mcvID := w.Spawn()
+	w.Attach(mcvID, &core.Position{X: 10, Y: 10})
+	w.Attach(mcvID, &core.Health{Current: 1000, Max: 1000})
+	w.Attach(mcvID, &core.Movable{Speed: 0.8, MoveType: core.MoveVehicle})
+	w.Attach(mcvID, &core.Sprite{Width: 32, Height: 32, Visible: true, ScaleX: 1, ScaleY: 1})
+	w.Attach(mcvID, &core.Selectable{Radius: 0.8})
+	w.Attach(mcvID, &core.Owner{PlayerID: 0, Faction: "Allied"})
+	w.Attach(mcvID, &core.FogVision{Range: 6})
+	w.Attach(mcvID, &core.MCV{CanDeploy: true})
+	w.Attach(mcvID, &core.Armor{ArmorType: core.ArmorHeavy})
 
-	// Player 0: Power Plant
-	ppID := w.Spawn()
-	w.Attach(ppID, &core.Position{X: 14, Y: 10})
-	w.Attach(ppID, &core.Health{Current: 750, Max: 750})
-	w.Attach(ppID, &core.Building{SizeX: 2, SizeY: 2, PowerGen: 100, Sellable: true})
-	w.Attach(ppID, &core.Owner{PlayerID: 0, Faction: "Allied"})
-	w.Attach(ppID, &core.FogVision{Range: 5})
-	w.Attach(ppID, &core.Selectable{Radius: 1.0})
-	w.Attach(ppID, &core.BuildingName{Key: "power_plant"})
+	// ---- AI Player 1: MCV that auto-deploys immediately ----
+	aiMcvID := w.Spawn()
+	w.Attach(aiMcvID, &core.Position{X: 54, Y: 54})
+	w.Attach(aiMcvID, &core.Health{Current: 1000, Max: 1000})
+	w.Attach(aiMcvID, &core.Movable{Speed: 0.8, MoveType: core.MoveVehicle})
+	w.Attach(aiMcvID, &core.Sprite{Width: 32, Height: 32, Visible: true, ScaleX: 1, ScaleY: 1})
+	w.Attach(aiMcvID, &core.Selectable{Radius: 0.8})
+	w.Attach(aiMcvID, &core.Owner{PlayerID: 1, Faction: "Soviet"})
+	w.Attach(aiMcvID, &core.FogVision{Range: 6})
+	w.Attach(aiMcvID, &core.MCV{CanDeploy: true})
+	w.Attach(aiMcvID, &core.Armor{ArmorType: core.ArmorHeavy})
 
-	// Player 0: Barracks
-	barID := w.Spawn()
-	w.Attach(barID, &core.Position{X: 10, Y: 14})
-	w.Attach(barID, &core.Health{Current: 500, Max: 500})
-	w.Attach(barID, &core.Building{SizeX: 2, SizeY: 2, PowerDraw: 20, Sellable: true})
-	w.Attach(barID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 12, Y: 16}})
-	w.Attach(barID, &core.Owner{PlayerID: 0, Faction: "Allied"})
-	w.Attach(barID, &core.FogVision{Range: 5})
-	w.Attach(barID, &core.Selectable{Radius: 1.0})
-	w.Attach(barID, &core.BuildingName{Key: "barracks"})
-
-	// Player 0: Refinery
-	refID := w.Spawn()
-	w.Attach(refID, &core.Position{X: 14, Y: 14})
-	w.Attach(refID, &core.Health{Current: 900, Max: 900})
-	w.Attach(refID, &core.Building{SizeX: 3, SizeY: 3, PowerDraw: 30, Sellable: true})
-	w.Attach(refID, &core.Owner{PlayerID: 0, Faction: "Allied"})
-	w.Attach(refID, &core.FogVision{Range: 5})
-	w.Attach(refID, &core.Selectable{Radius: 1.5})
-	w.Attach(refID, &core.BuildingName{Key: "refinery"})
-
-	// Player 0: Starting infantry
-	for i := 0; i < 5; i++ {
-		uid := w.Spawn()
-		w.Attach(uid, &core.Position{X: float64(8 + i), Y: 13})
-		w.Attach(uid, &core.Sprite{Width: 24, Height: 24, Visible: true, ScaleX: 1, ScaleY: 1})
-		w.Attach(uid, &core.Health{Current: 125, Max: 125})
-		w.Attach(uid, &core.Movable{Speed: 3.0, MoveType: core.MoveInfantry})
-		w.Attach(uid, &core.Weapon{Name: "Rifle", Damage: 15, Range: 5, Cooldown: 1.0, DamageType: core.DmgKinetic, TargetType: core.TargetAll})
-		w.Attach(uid, &core.Armor{ArmorType: core.ArmorLight})
-		w.Attach(uid, &core.Selectable{Radius: 0.5})
-		w.Attach(uid, &core.Owner{PlayerID: 0, Faction: "Allied"})
-		w.Attach(uid, &core.FogVision{Range: 5})
-	}
-
-	// Player 0: Harvester
-	harvID := w.Spawn()
-	w.Attach(harvID, &core.Position{X: 15, Y: 16})
-	w.Attach(harvID, &core.Sprite{Width: 28, Height: 28, Visible: true, ScaleX: 1, ScaleY: 1})
-	w.Attach(harvID, &core.Health{Current: 600, Max: 600})
-	w.Attach(harvID, &core.Movable{Speed: 1.5, MoveType: core.MoveVehicle})
-	w.Attach(harvID, &core.Harvester{Capacity: 20, Rate: 2.0, Resource: "ore"})
-	w.Attach(harvID, &core.Selectable{Radius: 0.6})
-	w.Attach(harvID, &core.Owner{PlayerID: 0, Faction: "Allied"})
-	w.Attach(harvID, &core.FogVision{Range: 4})
-
-	// ---- AI Player 1 ----
-	aicyID := w.Spawn()
-	w.Attach(aicyID, &core.Position{X: 54, Y: 54})
-	w.Attach(aicyID, &core.Health{Current: 1000, Max: 1000})
-	w.Attach(aicyID, &core.Building{SizeX: 3, SizeY: 3, PowerGen: 0, IsConYard: true})
-	w.Attach(aicyID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 52, Y: 52}})
-	w.Attach(aicyID, &core.Owner{PlayerID: 1, Faction: "Soviet"})
-	w.Attach(aicyID, &core.FogVision{Range: 8})
-	w.Attach(aicyID, &core.BuildingName{Key: "construction_yard"})
-
-	aippID := w.Spawn()
-	w.Attach(aippID, &core.Position{X: 50, Y: 54})
-	w.Attach(aippID, &core.Health{Current: 750, Max: 750})
-	w.Attach(aippID, &core.Building{SizeX: 2, SizeY: 2, PowerGen: 100})
-	w.Attach(aippID, &core.Owner{PlayerID: 1, Faction: "Soviet"})
-	w.Attach(aippID, &core.FogVision{Range: 5})
-
-	aibarID := w.Spawn()
-	w.Attach(aibarID, &core.Position{X: 54, Y: 50})
-	w.Attach(aibarID, &core.Health{Current: 500, Max: 500})
-	w.Attach(aibarID, &core.Building{SizeX: 2, SizeY: 2, PowerDraw: 20})
-	w.Attach(aibarID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 52, Y: 48}})
-	w.Attach(aibarID, &core.Owner{PlayerID: 1, Faction: "Soviet"})
-	w.Attach(aibarID, &core.FogVision{Range: 5})
-
-	for i := 0; i < 5; i++ {
-		uid := w.Spawn()
-		w.Attach(uid, &core.Position{X: float64(52 + i), Y: 52})
-		w.Attach(uid, &core.Sprite{Width: 24, Height: 24, Visible: true, ScaleX: 1, ScaleY: 1})
-		w.Attach(uid, &core.Health{Current: 100, Max: 100})
-		w.Attach(uid, &core.Movable{Speed: 3.0, MoveType: core.MoveInfantry})
-		w.Attach(uid, &core.Weapon{Name: "AK", Damage: 12, Range: 4.5, Cooldown: 1.0, DamageType: core.DmgKinetic, TargetType: core.TargetAll})
-		w.Attach(uid, &core.Armor{ArmorType: core.ArmorNone})
-		w.Attach(uid, &core.Selectable{Radius: 0.5})
-		w.Attach(uid, &core.Owner{PlayerID: 1, Faction: "Soviet"})
-		w.Attach(uid, &core.FogVision{Range: 5})
-	}
+	// Auto-deploy AI MCV into Construction Yard immediately
+	systems.DeployMCV(w, aiMcvID, g.eventBus)
 }
 
 func (g *Game) markInitialBuildingTiles() {

@@ -66,7 +66,7 @@ func NewTechTree() *TechTree {
 	tt.Buildings["power_plant"] = &BuildingDef{Name: "Power Plant", Cost: 800, BuildTime: 10, HP: 750, SizeX: 2, SizeY: 2, PowerGen: 100, PowerDraw: 0, TechLevel: 0, Prereqs: []string{"construction_yard"}, Faction: ""}
 	tt.Buildings["barracks"] = &BuildingDef{Name: "Barracks", Cost: 500, BuildTime: 8, HP: 500, SizeX: 2, SizeY: 2, PowerDraw: 20, TechLevel: 0, CanProduce: []string{"gi", "conscript"}, Prereqs: []string{"power_plant"}, Faction: ""}
 	tt.Buildings["refinery"] = &BuildingDef{Name: "Ore Refinery", Cost: 2000, BuildTime: 15, HP: 900, SizeX: 3, SizeY: 3, PowerDraw: 30, TechLevel: 0, Prereqs: []string{"power_plant"}, Faction: ""}
-	tt.Buildings["war_factory"] = &BuildingDef{Name: "War Factory", Cost: 2000, BuildTime: 15, HP: 1000, SizeX: 3, SizeY: 3, PowerDraw: 50, TechLevel: 1, CanProduce: []string{"grizzly", "rhino", "harvester_a", "harvester_s"}, Prereqs: []string{"refinery"}, Faction: ""}
+	tt.Buildings["war_factory"] = &BuildingDef{Name: "War Factory", Cost: 2000, BuildTime: 15, HP: 1000, SizeX: 3, SizeY: 3, PowerDraw: 50, TechLevel: 1, CanProduce: []string{"grizzly", "rhino", "harvester_a", "harvester_s", "mcv"}, Prereqs: []string{"refinery"}, Faction: ""}
 
 	return tt
 }
