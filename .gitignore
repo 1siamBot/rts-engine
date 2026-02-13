@@ -1,0 +1,18 @@
+# Binary
+rts-game
+rts-editor
+*.exe
+*.app
+
+# Go
+vendor/
+*.test
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
