@@ -71,28 +71,91 @@ func NewTechTree() *TechTree {
 	return tt
 }
 
-// HasPrereqs checks if a player has all prerequisites built
+// HasPrereqs checks if a player has all prerequisites built (completed)
 func (tt *TechTree) HasPrereqs(w *core.World, playerID int, prereqs []string) bool {
 	if len(prereqs) == 0 {
 		return true
 	}
-	buildings := w.Query(core.CompBuilding, core.CompOwner)
+	// Collect all completed building keys owned by player
 	owned := make(map[string]bool)
-	for _, bid := range buildings {
+	for _, bid := range w.Query(core.CompBuilding, core.CompOwner, core.CompBuildingName) {
 		own := w.Get(bid, core.CompOwner).(*core.Owner)
 		if own.PlayerID != playerID {
 			continue
 		}
-		// We need a way to identify building type; use a tag or check
-		// For now we store building name in a simple lookup
-		// We'll use the Building component's TechLevel as proxy
-		// Better: we'll add a Name component or use sprite sheet ID
-		_ = bid
+		// Only count completed buildings
+		if bc := w.Get(bid, core.CompBuildingConstruction); bc != nil {
+			if !bc.(*core.BuildingConstruction).Complete {
+				continue
+			}
+		}
+		bn := w.Get(bid, core.CompBuildingName).(*core.BuildingName)
+		owned[bn.Key] = true
 	}
-	// Simplified: just check by querying building counts
-	_ = owned
-	// For now, return true — prereqs checked at production order time via player building list
+	for _, req := range prereqs {
+		if !owned[req] {
+			return false
+		}
+	}
 	return true
+}
+
+// PlayerOwnsBuildingKey checks if a player has a completed building of a given key
+func PlayerOwnsBuildingKey(w *core.World, playerID int, key string) bool {
+	for _, bid := range w.Query(core.CompBuilding, core.CompOwner, core.CompBuildingName) {
+		own := w.Get(bid, core.CompOwner).(*core.Owner)
+		if own.PlayerID != playerID {
+			continue
+		}
+		bn := w.Get(bid, core.CompBuildingName).(*core.BuildingName)
+		if bn.Key != key {
+			continue
+		}
+		if bc := w.Get(bid, core.CompBuildingConstruction); bc != nil {
+			if !bc.(*core.BuildingConstruction).Complete {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// FindProductionBuilding finds a building that can produce the given unit for a player
+func FindProductionBuilding(w *core.World, tt *TechTree, playerID int, unitKey string) core.EntityID {
+	for _, bid := range w.Query(core.CompProduction, core.CompOwner, core.CompBuildingName) {
+		own := w.Get(bid, core.CompOwner).(*core.Owner)
+		if own.PlayerID != playerID {
+			continue
+		}
+		bn := w.Get(bid, core.CompBuildingName).(*core.BuildingName)
+		bdef, ok := tt.Buildings[bn.Key]
+		if !ok {
+			continue
+		}
+		// Check if this building can produce the unit
+		canProduce := false
+		for _, u := range bdef.CanProduce {
+			if u == unitKey {
+				canProduce = true
+				break
+			}
+		}
+		if !canProduce {
+			continue
+		}
+		// Check building is complete
+		if bc := w.Get(bid, core.CompBuildingConstruction); bc != nil {
+			if !bc.(*core.BuildingConstruction).Complete {
+				continue
+			}
+		}
+		prod := w.Get(bid, core.CompProduction).(*core.Production)
+		if len(prod.Queue) < 5 {
+			return bid
+		}
+	}
+	return 0
 }
 
 // ProductionSystem handles building production queues
@@ -193,7 +256,10 @@ func (s *PowerSystem) Update(w *core.World, _ float64) {
 }
 
 // BuildingConstructionSystem handles building construction animation
-type BuildingConstructionSystem struct{}
+type BuildingConstructionSystem struct {
+	Players  *core.PlayerManager
+	EventBus *core.EventBus
+}
 
 func (s *BuildingConstructionSystem) Priority() int { return 6 }
 
@@ -204,18 +270,62 @@ func (s *BuildingConstructionSystem) Update(w *core.World, dt float64) {
 		if bc.Complete {
 			continue
 		}
-		bc.Progress += bc.Rate * dt
+
+		// Low power slows construction
+		rate := bc.Rate
+		if own := w.Get(id, core.CompOwner); own != nil {
+			o := own.(*core.Owner)
+			if player := s.Players.GetPlayer(o.PlayerID); player != nil {
+				if !player.HasPower() {
+					rate *= 0.5
+				}
+			}
+		}
+
+		bc.Progress += rate * dt
 		if bc.Progress >= 1.0 {
 			bc.Progress = 1.0
 			bc.Complete = true
 			// Restore full health
 			hp := w.Get(id, core.CompHealth).(*core.Health)
 			hp.Current = hp.Max
+
+			// Special: refinery spawns a harvester on completion
+			if bn := w.Get(id, core.CompBuildingName); bn != nil {
+				key := bn.(*core.BuildingName).Key
+				if key == "refinery" {
+					s.spawnRefineryHarvester(w, id)
+				}
+			}
 		} else {
 			// Health increases with construction
 			hp := w.Get(id, core.CompHealth).(*core.Health)
 			hp.Current = int(float64(hp.Max) * bc.Progress)
 		}
+	}
+}
+
+func (s *BuildingConstructionSystem) spawnRefineryHarvester(w *core.World, refID core.EntityID) {
+	pos := w.Get(refID, core.CompPosition)
+	own := w.Get(refID, core.CompOwner)
+	if pos == nil || own == nil {
+		return
+	}
+	p := pos.(*core.Position)
+	o := own.(*core.Owner)
+
+	uid := w.Spawn()
+	w.Attach(uid, &core.Position{X: p.X + 3, Y: p.Y + 1})
+	w.Attach(uid, &core.Sprite{Width: 28, Height: 28, Visible: true, ScaleX: 1, ScaleY: 1})
+	w.Attach(uid, &core.Health{Current: 600, Max: 600})
+	w.Attach(uid, &core.Movable{Speed: 1.5, MoveType: core.MoveVehicle})
+	w.Attach(uid, &core.Harvester{Capacity: 20, Rate: 2.0, Resource: "ore"})
+	w.Attach(uid, &core.Selectable{Radius: 0.6})
+	w.Attach(uid, &core.Owner{PlayerID: o.PlayerID, Faction: o.Faction})
+	w.Attach(uid, &core.FogVision{Range: 4})
+
+	if s.EventBus != nil {
+		s.EventBus.Emit(core.Event{Type: core.EvtUnitCreated, Tick: w.TickCount})
 	}
 }
 
@@ -281,7 +391,7 @@ func UndeployConYard(w *core.World, cyID core.EntityID, eventBus *core.EventBus)
 }
 
 // PlaceBuilding places a building at the given tile position
-func PlaceBuilding(w *core.World, key string, tt *TechTree, playerID int, tileX, tileY int, eventBus *core.EventBus) core.EntityID {
+func PlaceBuilding(w *core.World, key string, tt *TechTree, playerID int, tileX, tileY int, faction string, eventBus *core.EventBus) core.EntityID {
 	bdef, ok := tt.Buildings[key]
 	if !ok {
 		return 0
@@ -295,7 +405,7 @@ func PlaceBuilding(w *core.World, key string, tt *TechTree, playerID int, tileX,
 		PowerGen: bdef.PowerGen, PowerDraw: bdef.PowerDraw,
 		TechLevel: bdef.TechLevel, Sellable: true,
 	})
-	w.Attach(id, &core.Owner{PlayerID: playerID, Faction: ""})
+	w.Attach(id, &core.Owner{PlayerID: playerID, Faction: faction})
 	w.Attach(id, &core.FogVision{Range: 5})
 	w.Attach(id, &core.Selectable{Radius: 1.0})
 	w.Attach(id, &core.BuildingName{Key: key})
@@ -313,6 +423,29 @@ func PlaceBuilding(w *core.World, key string, tt *TechTree, playerID int, tileX,
 		eventBus.Emit(core.Event{Type: core.EvtBuildingPlaced, Tick: w.TickCount})
 	}
 	return id
+}
+
+// OccupyTiles marks tiles as occupied for a building footprint
+func OccupyTiles(tm TileMapOccupy, tileX, tileY, sizeX, sizeY int) {
+	for dy := 0; dy < sizeY; dy++ {
+		for dx := 0; dx < sizeX; dx++ {
+			tm.SetOccupied(tileX+dx, tileY+dy, true)
+		}
+	}
+}
+
+// FreeTiles unmarks tiles for a destroyed/sold building
+func FreeTiles(tm TileMapOccupy, tileX, tileY, sizeX, sizeY int) {
+	for dy := 0; dy < sizeY; dy++ {
+		for dx := 0; dx < sizeX; dx++ {
+			tm.SetOccupied(tileX+dx, tileY+dy, false)
+		}
+	}
+}
+
+// TileMapOccupy interface for marking tiles
+type TileMapOccupy interface {
+	SetOccupied(x, y int, occupied bool)
 }
 
 // SellBuilding sells a building for 50% of its cost

@@ -25,11 +25,14 @@ type Renderer3D struct {
 	// Building model cache: key -> mesh
 	buildingModels map[string]*Mesh3D
 	unitModels     map[string]*Mesh3D
+	minimapImg     *ebiten.Image
 
 	// Terrain cache
-	terrainCache     *Mesh3D
-	terrainCacheKey  string // "minX,minY,maxX,maxY"
-	terrainCacheTime float64
+	terrainCache      *Mesh3D
+	terrainCacheKey   string // "minX,minY,maxX,maxY"
+	waterCache        *Mesh3D
+	waterCacheKey     string
+	waterCacheTime    float64
 }
 
 // NewRenderer3D creates the 3D renderer
@@ -85,15 +88,23 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 	// 0. Sky gradient background
 	r.DrawSkyGradient(screen)
 
-	// 1. Terrain (cached, regenerated every 0.5s for water animation)
+	// 1. Terrain (static cached, water animated separately)
 	minX, minY, maxX, maxY := r.Camera.VisibleTileRange(tm.Width, tm.Height)
 	cacheKey := fmt.Sprintf("%d,%d,%d,%d", minX, minY, maxX, maxY)
-	if r.terrainCache == nil || r.terrainCacheKey != cacheKey || r.time-r.terrainCacheTime > 2.0 {
-		r.terrainCache = GenerateTerrainMesh(tm, minX, minY, maxX, maxY, r.time)
+	if r.terrainCache == nil || r.terrainCacheKey != cacheKey {
+		r.terrainCache = GenerateTerrainMeshStatic(tm, minX, minY, maxX, maxY)
 		r.terrainCacheKey = cacheKey
-		r.terrainCacheTime = r.time
 	}
 	r.renderMesh(screen, r.terrainCache)
+
+	// Water tiles (animated separately, lightweight)
+	waterKey := cacheKey
+	if r.waterCache == nil || r.waterCacheKey != waterKey || r.time-r.waterCacheTime > 0.05 {
+		r.waterCache = GenerateWaterMesh(tm, minX, minY, maxX, maxY, r.time)
+		r.waterCacheKey = waterKey
+		r.waterCacheTime = r.time
+	}
+	r.renderMesh(screen, r.waterCache)
 
 	// 2. Collect all entities with depth sorting
 	type entityDraw struct {
@@ -408,7 +419,10 @@ func (r *Renderer3D) DrawSelectionBox(screen *ebiten.Image, x1, y1, x2, y2 int) 
 
 // DrawMinimap draws a top-down minimap
 func (r *Renderer3D) DrawMinimap(screen *ebiten.Image, tm *maplib.TileMap, posX, posY, size int) {
-	minimap := ebiten.NewImage(size, size)
+	if r.minimapImg == nil || r.minimapImg.Bounds().Dx() != size {
+		r.minimapImg = ebiten.NewImage(size, size)
+	}
+	minimap := r.minimapImg
 	minimap.Fill(color.RGBA{0, 0, 0, 180})
 
 	scaleX := float64(size) / float64(tm.Width)

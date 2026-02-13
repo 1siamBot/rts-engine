@@ -39,8 +39,16 @@ func smoothNoise(x, y int) float64 {
 	return corners + sides + center
 }
 
-// GenerateTerrainMesh creates a 3D mesh for a tile range
+// GenerateTerrainMesh creates a 3D mesh for a tile range (legacy, includes water animation)
 func GenerateTerrainMesh(tm *maplib.TileMap, minX, minY, maxX, maxY int, time float64) *Mesh3D {
+	mesh := GenerateTerrainMeshStatic(tm, minX, minY, maxX, maxY)
+	water := GenerateWaterMesh(tm, minX, minY, maxX, maxY, time)
+	mesh.Append(water)
+	return mesh
+}
+
+// GenerateTerrainMeshStatic creates the static terrain (no water tiles, no animated ore)
+func GenerateTerrainMeshStatic(tm *maplib.TileMap, minX, minY, maxX, maxY int) *Mesh3D {
 	mesh := NewMesh()
 	up := V3(0, 1, 0)
 
@@ -51,6 +59,11 @@ func GenerateTerrainMesh(tm *maplib.TileMap, minX, minY, maxX, maxY int, time fl
 				continue
 			}
 
+			// Skip water tiles (rendered separately)
+			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
+				continue
+			}
+
 			baseColor, ok := TerrainBaseColors[tile.Terrain]
 			if !ok {
 				baseColor = Color3{0.5, 0.5, 0.5}
@@ -58,37 +71,24 @@ func GenerateTerrainMesh(tm *maplib.TileMap, minX, minY, maxX, maxY int, time fl
 
 			// Per-tile color variation for natural look
 			hash := uint32(x*7919+y*7927+x*y*31) % 1000
-			variation := float64(hash)/1000.0*0.08 - 0.04
+			variation := float64(hash)/1000.0*0.06 - 0.03
 			baseColor.R = math.Max(0, math.Min(1, baseColor.R+variation))
 			baseColor.G = math.Max(0, math.Min(1, baseColor.G+variation*1.2))
 			baseColor.B = math.Max(0, math.Min(1, baseColor.B+variation*0.5))
 
-			// Height: tile height + perlin noise variation
+			// Height
 			h := float64(tile.Height) * 0.15
 			noiseH := smoothNoise(x, y) * 0.06
 			h += noiseH
 
-			// Water: animate with wave
-			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
-				h = -0.05 + 0.04*math.Sin(time*2.0+float64(x)*0.5+float64(y)*0.7)
-				// Specular shimmer
-				spec := 0.15 * math.Abs(math.Sin(time*1.8+float64(x)*0.4+float64(y)*0.3))
-				baseColor.R = math.Min(1, baseColor.R+spec*0.3)
-				baseColor.G = math.Min(1, baseColor.G+spec*0.5)
-				baseColor.B = math.Min(1, baseColor.B+spec)
-			}
-
-			// Ore golden sparkle
+			// Ore base color (static golden tint)
 			if tile.OreAmount > 0 {
-				sparkle := 0.25 * math.Abs(math.Sin(time*3+float64(x*7+y*13)))
-				baseColor.R = math.Min(1, baseColor.R+sparkle)
-				baseColor.G = math.Min(1, baseColor.G+sparkle*0.7)
-				baseColor.B = math.Min(1, baseColor.B+sparkle*0.1)
+				baseColor.R = math.Min(1, baseColor.R+0.15)
+				baseColor.G = math.Min(1, baseColor.G+0.10)
 			}
 
 			fx, fz := float64(x), float64(y)
 
-			// Corner heights for smoother terrain
 			h00 := h
 			h10 := h + (smoothNoise(x+1, y)-smoothNoise(x, y))*0.02
 			h11 := h + (smoothNoise(x+1, y+1)-smoothNoise(x, y))*0.02
@@ -100,32 +100,49 @@ func GenerateTerrainMesh(tm *maplib.TileMap, minX, minY, maxX, maxY int, time fl
 			v3 := Vertex3D{Pos: V3(fx, h01, fz+1), Normal: up, Color: baseColor}
 			mesh.AddQuad(v0, v1, v2, v3)
 
-			// Subtle grid lines (slightly darker edges)
-			gridColor := Color3{baseColor.R * 0.85, baseColor.G * 0.85, baseColor.B * 0.85}
-			gridW := 0.03
-			// Bottom edge
-			ge0 := Vertex3D{Pos: V3(fx, h00+0.005, fz), Normal: up, Color: gridColor}
-			ge1 := Vertex3D{Pos: V3(fx+1, h10+0.005, fz), Normal: up, Color: gridColor}
-			ge2 := Vertex3D{Pos: V3(fx+1, h10+0.005, fz+gridW), Normal: up, Color: gridColor}
-			ge3 := Vertex3D{Pos: V3(fx, h00+0.005, fz+gridW), Normal: up, Color: gridColor}
-			mesh.AddQuad(ge0, ge1, ge2, ge3)
-			// Left edge
-			gl0 := Vertex3D{Pos: V3(fx, h00+0.005, fz), Normal: up, Color: gridColor}
-			gl1 := Vertex3D{Pos: V3(fx+gridW, h00+0.005, fz), Normal: up, Color: gridColor}
-			gl2 := Vertex3D{Pos: V3(fx+gridW, h01+0.005, fz+1), Normal: up, Color: gridColor}
-			gl3 := Vertex3D{Pos: V3(fx, h01+0.005, fz+1), Normal: up, Color: gridColor}
-			mesh.AddQuad(gl0, gl1, gl2, gl3)
-
 			// Cliff/elevation side faces
 			if tile.Height > 0 {
 				sideColor := Color3{baseColor.R * 0.65, baseColor.G * 0.65, baseColor.B * 0.65}
 				addTerrainSides(mesh, tm, x, y, h, sideColor)
 			}
 
-			// Forest: add 3D tree geometry (cone + cylinder)
+			// Forest trees
 			if tile.Terrain == maplib.TerrainForest {
 				addTreeGeometry(mesh, fx+0.5, h, fz+0.5, hash)
 			}
+		}
+	}
+	return mesh
+}
+
+// GenerateWaterMesh creates animated water tiles only
+func GenerateWaterMesh(tm *maplib.TileMap, minX, minY, maxX, maxY int, time float64) *Mesh3D {
+	mesh := NewMesh()
+	up := V3(0, 1, 0)
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			tile := tm.At(x, y)
+			if tile == nil {
+				continue
+			}
+			if tile.Terrain != maplib.TerrainWater && tile.Terrain != maplib.TerrainDeepWater {
+				continue
+			}
+
+			baseColor, _ := TerrainBaseColors[tile.Terrain]
+			h := -0.05 + 0.04*math.Sin(time*2.0+float64(x)*0.5+float64(y)*0.7)
+			spec := 0.12 * math.Abs(math.Sin(time*1.8+float64(x)*0.4+float64(y)*0.3))
+			baseColor.R = math.Min(1, baseColor.R+spec*0.2)
+			baseColor.G = math.Min(1, baseColor.G+spec*0.3)
+			baseColor.B = math.Min(1, baseColor.B+spec*0.6)
+
+			fx, fz := float64(x), float64(y)
+			v0 := Vertex3D{Pos: V3(fx, h, fz), Normal: up, Color: baseColor}
+			v1 := Vertex3D{Pos: V3(fx+1, h, fz), Normal: up, Color: baseColor}
+			v2 := Vertex3D{Pos: V3(fx+1, h, fz+1), Normal: up, Color: baseColor}
+			v3 := Vertex3D{Pos: V3(fx, h, fz+1), Normal: up, Color: baseColor}
+			mesh.AddQuad(v0, v1, v2, v3)
 		}
 	}
 	return mesh

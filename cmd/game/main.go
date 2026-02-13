@@ -107,7 +107,7 @@ func NewGame() *Game {
 	// Register systems
 	w := g.gameLoop.World
 	w.AddSystem(&systems.PowerSystem{Players: g.players})
-	w.AddSystem(&systems.BuildingConstructionSystem{})
+	w.AddSystem(&systems.BuildingConstructionSystem{Players: g.players, EventBus: g.eventBus})
 	w.AddSystem(g.fogSys)
 	w.AddSystem(&systems.MovementSystem{NavGrid: g.navGrid})
 	w.AddSystem(&systems.CombatSystem{EventBus: g.eventBus, Players: g.players})
@@ -153,6 +153,7 @@ func (g *Game) spawnInitialEntities() {
 	w.Attach(ppID, &core.Building{SizeX: 2, SizeY: 2, PowerGen: 100, Sellable: true})
 	w.Attach(ppID, &core.Owner{PlayerID: 0, Faction: "Allied"})
 	w.Attach(ppID, &core.FogVision{Range: 5})
+	w.Attach(ppID, &core.Selectable{Radius: 1.0})
 	w.Attach(ppID, &core.BuildingName{Key: "power_plant"})
 
 	// Player 0: Barracks
@@ -173,6 +174,7 @@ func (g *Game) spawnInitialEntities() {
 	w.Attach(refID, &core.Building{SizeX: 3, SizeY: 3, PowerDraw: 30, Sellable: true})
 	w.Attach(refID, &core.Owner{PlayerID: 0, Faction: "Allied"})
 	w.Attach(refID, &core.FogVision{Range: 5})
+	w.Attach(refID, &core.Selectable{Radius: 1.5})
 	w.Attach(refID, &core.BuildingName{Key: "refinery"})
 
 	// Player 0: Starting infantry
@@ -366,16 +368,35 @@ func (g *Game) startBuildingPurchase(key string) {
 		return
 	}
 	player := g.players.GetPlayer(0)
-	if player == nil || player.Credits < bdef.Cost {
+	if player == nil {
 		return
 	}
+
+	// Check con yard exists
+	if !g.hud.PlayerHasConYard(g.gameLoop.World) {
+		g.hud.ShowMessage("Need Construction Yard", 2.0)
+		return
+	}
+
+	// Check prerequisites
+	if !g.techTree.HasPrereqs(g.gameLoop.World, 0, bdef.Prereqs) {
+		g.hud.ShowMessage("Missing prerequisites", 2.0)
+		return
+	}
+
+	// Check credits
+	if player.Credits < bdef.Cost {
+		g.hud.ShowMessage("Insufficient Funds", 2.0)
+		return
+	}
+
 	player.Credits -= bdef.Cost
 	g.hud.StartPlacement(key)
 }
 
 func (g *Game) placeBuilding() {
 	key := g.hud.Placement.BuildingKey
-	systems.PlaceBuilding(g.gameLoop.World, key, g.techTree, 0, g.hud.Placement.TileX, g.hud.Placement.TileY, g.eventBus)
+	systems.PlaceBuilding(g.gameLoop.World, key, g.techTree, 0, g.hud.Placement.TileX, g.hud.Placement.TileY, "Allied", g.eventBus)
 	g.hud.CancelPlacement()
 	g.audioMgr.PlaySFX(audio.SndBuild, float64(g.hud.Placement.TileX), float64(g.hud.Placement.TileY))
 }
@@ -388,11 +409,20 @@ func (g *Game) canPlaceBuilding(tileX, tileY, sizeX, sizeY int) bool {
 				return false
 			}
 			tile := g.tileMap.At(tx, ty)
-			if tile == nil || tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater || tile.Terrain == maplib.TerrainCliff {
+			if tile == nil {
+				return false
+			}
+			// Can't build on water, deep water, cliffs
+			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater || tile.Terrain == maplib.TerrainCliff {
+				return false
+			}
+			// Can't overlap existing buildings
+			if tile.Occupied {
 				return false
 			}
 		}
 	}
+	// Must be near an existing owned building (build radius ~10 tiles)
 	w := g.gameLoop.World
 	nearBuilding := false
 	for _, bid := range w.Query(core.CompBuilding, core.CompOwner, core.CompPosition) {
@@ -450,21 +480,32 @@ func (g *Game) queueUnit(unitType string) {
 	w := g.gameLoop.World
 	player := g.players.GetPlayer(0)
 	udef, ok := g.techTree.Units[unitType]
-	if !ok || player.Credits < udef.Cost {
+	if !ok {
 		return
 	}
-	for _, id := range w.Query(core.CompProduction, core.CompOwner) {
-		own := w.Get(id, core.CompOwner).(*core.Owner)
-		if own.PlayerID != 0 {
-			continue
-		}
-		prod := w.Get(id, core.CompProduction).(*core.Production)
-		if len(prod.Queue) < 5 {
-			player.Credits -= udef.Cost
-			prod.Queue = append(prod.Queue, unitType)
-			return
-		}
+
+	// Check credits
+	if player.Credits < udef.Cost {
+		g.hud.ShowMessage("Insufficient Funds", 2.0)
+		return
 	}
+
+	// Check prereqs
+	if !g.techTree.HasPrereqs(w, 0, udef.Prereqs) {
+		g.hud.ShowMessage("Missing prerequisites", 2.0)
+		return
+	}
+
+	// Find a production building that can produce this unit
+	bid := systems.FindProductionBuilding(w, g.techTree, 0, unitType)
+	if bid == 0 {
+		g.hud.ShowMessage("No building can produce this unit", 2.0)
+		return
+	}
+
+	prod := w.Get(bid, core.CompProduction).(*core.Production)
+	player.Credits -= udef.Cost
+	prod.Queue = append(prod.Queue, unitType)
 }
 
 func (g *Game) handleSelection(wx, wy float64, shift bool) {
@@ -757,9 +798,7 @@ func (g *Game) drawFogOverlay(screen *ebiten.Image) {
 }
 
 func (g *Game) drawOverlay(screen *ebiten.Image, title, subtitle string) {
-	overlay := ebiten.NewImage(ScreenWidth, ScreenHeight)
-	overlay.Fill(color.RGBA{0, 0, 0, 150})
-	screen.DrawImage(overlay, nil)
+	vector.DrawFilledRect(screen, 0, 0, float32(ScreenWidth), float32(ScreenHeight), color.RGBA{0, 0, 0, 150}, false)
 
 	boxW := float32(300)
 	boxH := float32(100)

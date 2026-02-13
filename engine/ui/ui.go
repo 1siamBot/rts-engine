@@ -98,6 +98,10 @@ type HUD struct {
 	// Tick counter for animations
 	tick float64
 
+	// Status message (e.g. "Insufficient Funds")
+	statusMsg     string
+	statusMsgTime float64
+
 	// Sprite draw callbacks (set externally to use real sprites)
 	UnitDrawFn     func(screen *ebiten.Image, w *core.World, id core.EntityID, sx, sy int, playerID int) bool
 	BuildingDrawFn func(screen *ebiten.Image, w *core.World, id core.EntityID, sx, sy int) bool
@@ -200,6 +204,11 @@ func (h *HUD) Update(dt float64) {
 		}
 	}
 
+	// Update status message
+	if h.statusMsgTime > 0 {
+		h.statusMsgTime -= dt
+	}
+
 	// Update effects
 	alive := h.Effects[:0]
 	for i := range h.Effects {
@@ -209,6 +218,12 @@ func (h *HUD) Update(dt float64) {
 		}
 	}
 	h.Effects = alive
+}
+
+// ShowMessage displays a temporary status message on screen
+func (h *HUD) ShowMessage(msg string, duration float64) {
+	h.statusMsg = msg
+	h.statusMsgTime = duration
 }
 
 func (h *HUD) AddEffect(x, y float64, kind string, size float64) {
@@ -225,6 +240,19 @@ func (h *HUD) Draw(screen *ebiten.Image, w *core.World) {
 	h.drawSidebar(screen, w)
 	h.drawBottomPanel(screen, w)
 	h.drawMinimap(screen, w)
+
+	// Status message (e.g. "Insufficient Funds")
+	if h.statusMsgTime > 0 && h.statusMsg != "" {
+		alpha := uint8(255)
+		if h.statusMsgTime < 0.5 {
+			alpha = uint8(h.statusMsgTime / 0.5 * 255)
+		}
+		msgW := len(h.statusMsg)*7 + 20
+		msgX := h.ScreenW/2 - msgW/2
+		msgY := h.ScreenH/2 - 40
+		drawRoundedRect(screen, float32(msgX), float32(msgY), float32(msgW), 28, 6, color.RGBA{180, 30, 30, alpha})
+		ebitenutil.DebugPrintAt(screen, h.statusMsg, msgX+10, msgY+8)
+	}
 }
 
 // DrawWorldEffects draws selection circles, health bars above units, and effects
@@ -595,7 +623,7 @@ func (h *HUD) drawBuildingButtons(screen *ebiten.Image, w *core.World, sx, start
 	bIdx := 0
 
 	// Check if player has construction yard
-	hasConYard := h.playerHasConYard(w)
+	hasConYard := h.PlayerHasConYard(w)
 
 	for key, bdef := range h.TechTree.Buildings {
 		if bIdx >= 10 {
@@ -1146,7 +1174,7 @@ func (h *HUD) GetSidebarUnitClick(mx, my int) string {
 	return ""
 }
 
-func (h *HUD) playerHasConYard(w *core.World) bool {
+func (h *HUD) PlayerHasConYard(w *core.World) bool {
 	for _, id := range w.Query(core.CompBuilding, core.CompOwner) {
 		own := w.Get(id, core.CompOwner).(*core.Owner)
 		if own.PlayerID != h.LocalPlayer {

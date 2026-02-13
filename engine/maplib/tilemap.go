@@ -179,6 +179,13 @@ func (tm *TileMap) SetTerrain(x1, y1, x2, y2 int, terrain TerrainType) {
 }
 
 // PlaceOre places ore resources at a position
+// SetOccupied marks a tile as occupied/unoccupied by a building
+func (tm *TileMap) SetOccupied(x, y int, occupied bool) {
+	if t := tm.At(x, y); t != nil {
+		t.Occupied = occupied
+	}
+}
+
 func (tm *TileMap) PlaceOre(x, y, amount int) {
 	if t := tm.At(x, y); t != nil {
 		t.Terrain = TerrainOre
