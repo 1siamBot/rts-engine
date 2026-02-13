@@ -609,74 +609,107 @@ func (h *HUD) drawBuildingButtons(screen *ebiten.Image, w *core.World, sx, start
 		hasPrereqs := true // simplified
 		enabled := canAfford && hasPrereqs && hasConYard
 
-		// Button
-		btnX := float32(sx + 10)
-		btnY := float32(y)
-		btnW := float32(h.SidebarWidth - 20)
-		btnH := float32(48)
+		btnX := sx + 10
+		btnY := y
+		btnW := h.SidebarWidth - 20
+		btnH := 48
 
-		clr := btnNormal
+		// Draw button sprite
+		state := "normal"
 		if !enabled {
-			clr = btnDisabled
+			state = "disabled"
 		} else if h.HoverBuildIdx == bIdx {
-			clr = btnHover
+			state = "hover"
 		}
+		h.Sprites.DrawRectButton(screen, btnX, btnY, btnW, btnH, state)
 
-		drawRoundedRect(screen, btnX, btnY, btnW, btnH, 6, clr)
+		// Building thumbnail icon (3D-like with beveled edge)
+		iconX := float32(btnX + 4)
+		iconY := float32(btnY + 4)
+		// Dark inset for icon area
+		vector.DrawFilledRect(screen, iconX, iconY, 40, 40, color.RGBA{15, 20, 30, 240}, false)
+		// Beveled edges
+		vector.StrokeLine(screen, iconX, iconY, iconX+40, iconY, 1, color.RGBA{60, 70, 90, 200}, false)
+		vector.StrokeLine(screen, iconX, iconY, iconX, iconY+40, 1, color.RGBA{60, 70, 90, 200}, false)
+		vector.StrokeLine(screen, iconX+40, iconY, iconX+40, iconY+40, 1, color.RGBA{8, 10, 15, 200}, false)
+		vector.StrokeLine(screen, iconX, iconY+40, iconX+40, iconY+40, 1, color.RGBA{8, 10, 15, 200}, false)
 
-		// Icon placeholder (colored square)
-		iconClr := accentBlue
-		if !enabled {
-			iconClr = color.RGBA{40, 40, 50, 200}
+		// Building icon: colored isometric block
+		if enabled {
+			cx := iconX + 20
+			cy := iconY + 20
+			bclr := accentBlue
+			// Draw simple isometric building shape
+			drawIsoBlock(screen, cx, cy, 14, 10, bclr)
 		}
-		drawRoundedRect(screen, btnX+4, btnY+4, 40, 40, 4, iconClr)
-
-		// Building initial letter as icon
+		// Initial letter overlay
 		if len(bdef.Name) > 0 {
-			ebitenutil.DebugPrintAt(screen, string(bdef.Name[0]), int(btnX)+18, int(btnY)+16)
+			ebitenutil.DebugPrintAt(screen, string(bdef.Name[0]), int(iconX)+16, int(iconY)+14)
 		}
 
-		// Name + Cost
-		nameClr := textWhite
-		if !enabled {
-			nameClr = textDim
-		}
-		_ = nameClr
-		ebitenutil.DebugPrintAt(screen, bdef.Name, int(btnX)+48, int(btnY)+8)
+		// Name + Cost text
+		ebitenutil.DebugPrintAt(screen, bdef.Name, btnX+48, btnY+6)
 		costStr := fmt.Sprintf("$%d", bdef.Cost)
-		costClr := textDim
-		if !canAfford {
-			costClr = healthRed
-		}
-		_ = costClr
-		ebitenutil.DebugPrintAt(screen, costStr, int(btnX)+48, int(btnY)+22)
+		ebitenutil.DebugPrintAt(screen, costStr, btnX+48, btnY+18)
 
 		// Power info
 		if bdef.PowerGen > 0 {
-			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("+%d⚡", bdef.PowerGen), int(btnX)+48, int(btnY)+34)
+			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("+%d⚡", bdef.PowerGen), btnX+48, btnY+30)
 		} else if bdef.PowerDraw > 0 {
-			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("-%d⚡", bdef.PowerDraw), int(btnX)+48, int(btnY)+34)
+			ebitenutil.DebugPrintAt(screen, fmt.Sprintf("-%d⚡", bdef.PowerDraw), btnX+48, btnY+30)
 		}
 
-		// Build progress overlay
+		// Build progress bar (glossy)
 		if prog, ok := h.BuildProgress[key]; ok && prog > 0 && prog < 1 {
-			vector.DrawFilledRect(screen, btnX, btnY+btnH-4, btnW*float32(prog), 4, accentCyan, false)
+			h.Sprites.DrawBar(screen, btnX+2, btnY+btnH-6, btnW-4, 4, prog, "progress")
 		}
 
-		// Border
-		borderClr := panelBorder
-		if enabled && h.HoverBuildIdx == bIdx {
-			borderClr = accentCyan
-		}
-		drawRoundedRectStroke(screen, btnX, btnY, btnW, btnH, 6, borderClr)
-
-		y += int(btnH) + 4
+		y += btnH + 4
 		bIdx++
 	}
 
 	if !hasConYard {
 		ebitenutil.DebugPrintAt(screen, "⚠ Need Con. Yard", sx+20, y+10)
 	}
+}
+
+// drawIsoBlock draws a small 3D isometric block for building icons
+func drawIsoBlock(screen *ebiten.Image, cx, cy, w, h float32, clr color.RGBA) {
+	// Top face (lighter)
+	topClr := color.RGBA{
+		uint8(min(int(clr.R)+40, 255)),
+		uint8(min(int(clr.G)+40, 255)),
+		uint8(min(int(clr.B)+40, 255)),
+		clr.A,
+	}
+	// Draw top diamond
+	hw := w / 2
+	hh := h / 4
+	vector.DrawFilledRect(screen, cx-hw, cy-hh-h/2, w, h/2, topClr, false)
+	// Front face (normal color)
+	vector.DrawFilledRect(screen, cx-hw, cy-hh, w/2, h/2, clr, false)
+	// Right face (darker)
+	sideClr := color.RGBA{
+		uint8(max(int(clr.R)-30, 0)),
+		uint8(max(int(clr.G)-30, 0)),
+		uint8(max(int(clr.B)-30, 0)),
+		clr.A,
+	}
+	vector.DrawFilledRect(screen, cx, cy-hh, w/2, h/2, sideClr, false)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (h *HUD) drawUnitButtons(screen *ebiten.Image, w *core.World, sx, startY int, player *core.Player) {
@@ -690,34 +723,46 @@ func (h *HUD) drawUnitButtons(screen *ebiten.Image, w *core.World, sx, startY in
 		canAfford := player != nil && player.Credits >= udef.Cost
 		enabled := canAfford
 
-		btnX := float32(sx + 10)
-		btnY := float32(y)
-		btnW := float32(h.SidebarWidth - 20)
-		btnH := float32(40)
+		btnX := sx + 10
+		btnY := y
+		btnW := h.SidebarWidth - 20
+		btnH := 40
 
-		clr := btnNormal
+		state := "normal"
 		if !enabled {
-			clr = btnDisabled
+			state = "disabled"
 		}
+		h.Sprites.DrawRectButton(screen, btnX, btnY, btnW, btnH, state)
 
-		drawRoundedRect(screen, btnX, btnY, btnW, btnH, 6, clr)
-
-		// Unit icon (circle)
+		// Unit icon (inset circle with 3D look)
+		iconCx := float32(btnX + 20)
+		iconCy := float32(btnY + 20)
 		iconClr := color.RGBA{50, 130, 50, 255}
 		if !enabled {
 			iconClr = color.RGBA{40, 40, 50, 200}
 		}
-		vector.DrawFilledCircle(screen, btnX+24, btnY+20, 14, iconClr, false)
+		// Shadow
+		vector.DrawFilledCircle(screen, iconCx+1, iconCy+1, 14, color.RGBA{0, 0, 0, 100}, false)
+		// Main circle
+		vector.DrawFilledCircle(screen, iconCx, iconCy, 14, iconClr, false)
+		// Highlight
+		vector.DrawFilledCircle(screen, iconCx-3, iconCy-3, 6, color.RGBA{
+			uint8(min(int(iconClr.R)+50, 255)),
+			uint8(min(int(iconClr.G)+50, 255)),
+			uint8(min(int(iconClr.B)+50, 255)),
+			100,
+		}, false)
+		// Rim
+		vector.StrokeCircle(screen, iconCx, iconCy, 14, 1.5, color.RGBA{80, 90, 100, 200}, false)
+
 		if len(udef.Name) > 0 {
-			ebitenutil.DebugPrintAt(screen, string(udef.Name[0]), int(btnX)+20, int(btnY)+14)
+			ebitenutil.DebugPrintAt(screen, string(udef.Name[0]), btnX+16, btnY+14)
 		}
 
-		ebitenutil.DebugPrintAt(screen, udef.Name, int(btnX)+44, int(btnY)+6)
-		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("$%d", udef.Cost), int(btnX)+44, int(btnY)+20)
+		ebitenutil.DebugPrintAt(screen, udef.Name, btnX+40, btnY+6)
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("$%d", udef.Cost), btnX+40, btnY+20)
 
-		drawRoundedRectStroke(screen, btnX, btnY, btnW, btnH, 6, panelBorder)
-
-		y += int(btnH) + 4
+		y += btnH + 4
 		uIdx++
 	}
 }
@@ -727,13 +772,19 @@ func (h *HUD) drawBottomPanel(screen *ebiten.Image, w *core.World) {
 		return
 	}
 
-	panelW := float32(h.ScreenW - h.SidebarWidth - h.MinimapSize - 20)
-	panelX := float32(h.MinimapSize + 10)
-	panelY := float32(h.ScreenH - h.BottomPanelH)
+	panelW := h.ScreenW - h.SidebarWidth - h.MinimapSize - 20
+	panelX := h.MinimapSize + 10
+	panelY := h.ScreenH - h.BottomPanelH
 
-	drawRoundedRect(screen, panelX, panelY, panelW, float32(h.BottomPanelH), 8, panelBG)
-	// Top accent
-	vector.DrawFilledRect(screen, panelX+8, panelY, panelW-16, 2, accentCyan, false)
+	// Metallic panel background
+	panel := h.Sprites.GenerateBottomPanel(panelW, h.BottomPanelH)
+	if panel != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(panelX), float64(panelY))
+		screen.DrawImage(panel, op)
+	} else {
+		drawRoundedRect(screen, float32(panelX), float32(panelY), float32(panelW), float32(h.BottomPanelH), 8, panelBG)
+	}
 
 	if len(h.SelectedIDs) == 0 {
 		return
@@ -741,24 +792,48 @@ func (h *HUD) drawBottomPanel(screen *ebiten.Image, w *core.World) {
 
 	// Single unit info or multi-select
 	if len(h.SelectedIDs) == 1 {
-		h.drawSingleUnitInfo(screen, w, int(panelX)+10, int(panelY)+10)
+		h.drawSingleUnitInfo(screen, w, panelX+10, panelY+10)
 	} else {
-		h.drawMultiSelectInfo(screen, w, int(panelX)+10, int(panelY)+10)
+		h.drawMultiSelectInfo(screen, w, panelX+10, panelY+10)
 	}
 
 	// Command buttons
-	h.drawCommandButtons(screen, int(panelX)+int(panelW)-250, int(panelY)+15)
+	h.drawCommandButtons(screen, panelX+panelW-250, panelY+15)
 }
 
 func (h *HUD) drawSingleUnitInfo(screen *ebiten.Image, w *core.World, x, y int) {
 	id := h.SelectedIDs[0]
 
-	// Unit portrait
+	// Unit portrait frame (metallic inset)
+	vector.DrawFilledRect(screen, float32(x), float32(y), 64, 64, color.RGBA{10, 15, 25, 240}, false)
+	// Beveled border
+	vector.StrokeLine(screen, float32(x), float32(y), float32(x+64), float32(y), 1, color.RGBA{70, 80, 100, 200}, false)
+	vector.StrokeLine(screen, float32(x), float32(y), float32(x), float32(y+64), 1, color.RGBA{70, 80, 100, 200}, false)
+	vector.StrokeLine(screen, float32(x+64), float32(y), float32(x+64), float32(y+64), 1, color.RGBA{15, 20, 30, 200}, false)
+	vector.StrokeLine(screen, float32(x), float32(y+64), float32(x+64), float32(y+64), 1, color.RGBA{15, 20, 30, 200}, false)
+
+	// Unit portrait icon
 	portraitClr := accentBlue
 	if w.Has(id, core.CompBuilding) {
 		portraitClr = color.RGBA{60, 60, 160, 255}
 	}
-	drawRoundedRect(screen, float32(x), float32(y), 60, 60, 6, portraitClr)
+	if w.Has(id, core.CompHarvester) {
+		portraitClr = color.RGBA{50, 180, 100, 255}
+	}
+	if w.Has(id, core.CompMCV) {
+		portraitClr = color.RGBA{120, 80, 200, 255}
+	}
+	// 3D sphere in portrait
+	cx, cy := float32(x+32), float32(y+32)
+	vector.DrawFilledCircle(screen, cx+1, cy+1, 22, color.RGBA{0, 0, 0, 100}, false)
+	vector.DrawFilledCircle(screen, cx, cy, 22, portraitClr, false)
+	vector.DrawFilledCircle(screen, cx-6, cy-6, 10, color.RGBA{
+		uint8(min(int(portraitClr.R)+60, 255)),
+		uint8(min(int(portraitClr.G)+60, 255)),
+		uint8(min(int(portraitClr.B)+60, 255)),
+		100,
+	}, false)
+	vector.StrokeCircle(screen, cx, cy, 22, 1.5, color.RGBA{90, 100, 120, 200}, false)
 
 	// Name
 	name := "Unit"
@@ -771,38 +846,37 @@ func (h *HUD) drawSingleUnitInfo(screen *ebiten.Image, w *core.World, x, y int) 
 	if w.Has(id, core.CompMCV) {
 		name = "MCV"
 	}
-	ebitenutil.DebugPrintAt(screen, name, x+70, y+5)
+	ebitenutil.DebugPrintAt(screen, name, x+72, y+5)
 
-	// Health bar
+	// Health bar (glossy sprite)
 	if hp := w.Get(id, core.CompHealth); hp != nil {
 		health := hp.(*core.Health)
-		ratio := float32(health.Ratio())
-		barW := float32(120)
-		barX := float32(x + 70)
-		barY := float32(y + 22)
-		vector.DrawFilledRect(screen, barX, barY, barW, 8, color.RGBA{20, 20, 30, 200}, false)
-		vector.DrawFilledRect(screen, barX, barY, barW*ratio, 8, healthBarColor(ratio), false)
-		vector.StrokeRect(screen, barX, barY, barW, 8, 1, panelBorder, false)
+		ratio := health.Ratio()
+		h.Sprites.DrawBar(screen, x+72, y+20, 130, 12, ratio, "health")
 		hpText := fmt.Sprintf("%d / %d", health.Current, health.Max)
-		ebitenutil.DebugPrintAt(screen, hpText, int(barX), int(barY)+12)
+		ebitenutil.DebugPrintAt(screen, hpText, x+72, y+34)
 	}
 
-	// Weapon info
+	// Weapon info with attack icon
 	if wep := w.Get(id, core.CompWeapon); wep != nil {
 		weapon := wep.(*core.Weapon)
-		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("⚔ DMG: %d  RNG: %.1f", weapon.Damage, weapon.Range), x+70, y+45)
+		if h.Sprites.IconAttack != nil {
+			h.Sprites.DrawIcon(screen, h.Sprites.IconAttack, x+80, y+55, 12)
+		}
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("DMG:%d RNG:%.0f", weapon.Damage, weapon.Range), x+90, y+50)
 	}
 
-	// MCV deploy button
+	// MCV deploy button (sci-fi style)
 	if w.Has(id, core.CompMCV) {
-		btnX := float32(x + 70)
-		btnY := float32(y + 58)
-		clr := accentBlue
+		state := "normal"
 		if h.CurrentCommand == CmdDeploy {
-			clr = btnActive
+			state = "active"
 		}
-		drawRoundedRect(screen, btnX, btnY, 70, 20, 4, clr)
-		ebitenutil.DebugPrintAt(screen, "DEPLOY", int(btnX)+12, int(btnY)+4)
+		h.Sprites.DrawRectButton(screen, x+72, y+62, 80, 22, state)
+		if h.Sprites.IconDeploy != nil {
+			h.Sprites.DrawIcon(screen, h.Sprites.IconDeploy, x+84, y+73, 14)
+		}
+		ebitenutil.DebugPrintAt(screen, "DEPLOY", x+94, y+67)
 	}
 }
 
@@ -839,75 +913,111 @@ func (h *HUD) drawMultiSelectInfo(screen *ebiten.Image, w *core.World, x, y int)
 
 func (h *HUD) drawCommandButtons(screen *ebiten.Image, x, y int) {
 	cmds := []struct {
-		icon string
 		name string
 		cmd  CommandType
 	}{
-		{"🏃", "Move", CmdMove},
-		{"⚔", "Attack", CmdAttack},
-		{"■", "Stop", CmdStop},
-		{"🛡", "Guard", CmdGuard},
-		{"📍", "Rally", CmdRally},
+		{"Move", CmdMove},
+		{"Attack", CmdAttack},
+		{"Stop", CmdStop},
+		{"Guard", CmdGuard},
+		{"Rally", CmdRally},
 	}
 
 	for i, c := range cmds {
-		bx := float32(x + i*48)
-		by := float32(y)
+		bx := x + i*48
+		by := y
 		active := h.CurrentCommand == c.cmd
 
-		clr := btnNormal
+		state := "normal"
 		if active {
-			clr = btnActive
+			state = "active"
 		} else if h.HoverCmdIdx == i {
-			clr = btnHover
+			state = "hover"
 		}
 
-		drawRoundedRect(screen, bx, by, 42, 42, 6, clr)
-		drawRoundedRectStroke(screen, bx, by, 42, 42, 6, panelBorder)
+		// Draw sci-fi square button sprite
+		h.Sprites.DrawButton(screen, bx, by, 44, 44, state)
 
-		// Icon
-		ebitenutil.DebugPrintAt(screen, c.icon, int(bx)+14, int(by)+8)
-		// Label
-		ebitenutil.DebugPrintAt(screen, c.name, int(bx)+4, int(by)+28)
+		// Draw command icon sprite
+		icon := h.Sprites.GetCommandIcon(c.cmd)
+		if icon != nil {
+			h.Sprites.DrawIcon(screen, icon, bx+22, by+18, 20)
+		}
+
+		// Label below icon
+		textX := bx + 22 - len(c.name)*3
+		ebitenutil.DebugPrintAt(screen, c.name, textX, by+32)
 	}
 }
 
 func (h *HUD) drawMinimap(screen *ebiten.Image, w *core.World) {
-	mx := float32(5)
-	my := float32(h.ScreenH - h.MinimapSize - 5)
-	mw := float32(h.MinimapSize)
-	mh := float32(h.MinimapSize)
+	mx := 5
+	my := h.ScreenH - h.MinimapSize - 5
+	mw := h.MinimapSize
+	mh := h.MinimapSize
 
-	// Frame
-	drawRoundedRect(screen, mx-2, my-18, mw+4, mh+22, 6, panelBG)
-	drawRoundedRectStroke(screen, mx-2, my-18, mw+4, mh+22, 6, panelBorder)
+	// Metallic frame
+	frame := h.Sprites.GenerateMinimapFrame(h.MinimapSize)
+	if frame != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(mx-4), float64(my-20))
+		screen.DrawImage(frame, op)
+	} else {
+		drawRoundedRect(screen, float32(mx-2), float32(my-18), float32(mw+4), float32(mh+22), 6, panelBG)
+		drawRoundedRectStroke(screen, float32(mx-2), float32(my-18), float32(mw+4), float32(mh+22), 6, panelBorder)
+	}
 
 	// Title
-	ebitenutil.DebugPrintAt(screen, "TACTICAL MAP", int(mx)+30, int(my)-14)
+	ebitenutil.DebugPrintAt(screen, "TACTICAL MAP", mx+30, my-16)
 
-	// Minimap content area
-	vector.DrawFilledRect(screen, mx, my, mw, mh, minimapBG, false)
+	// Minimap content area (dark inset)
+	vector.DrawFilledRect(screen, float32(mx), float32(my), float32(mw), float32(mh), minimapBG, false)
 
-	// Units as dots
+	// Radar sweep effect (rotating line)
+	sweepAngle := h.tick * 0.8
+	sweepCx := float32(mx) + float32(mw)/2
+	sweepCy := float32(my) + float32(mh)/2
+	sweepR := float32(mw) / 2
+	endX := sweepCx + sweepR*float32(math.Cos(sweepAngle))
+	endY := sweepCy + sweepR*float32(math.Sin(sweepAngle))
+	vector.StrokeLine(screen, sweepCx, sweepCy, endX, endY, 1, color.RGBA{0, 200, 100, 60}, false)
+	// Fading trail
+	for i := 1; i < 8; i++ {
+		trailAngle := sweepAngle - float64(i)*0.08
+		tEndX := sweepCx + sweepR*float32(math.Cos(trailAngle))
+		tEndY := sweepCy + sweepR*float32(math.Sin(trailAngle))
+		alpha := uint8(40 - i*5)
+		if alpha > 40 {
+			alpha = 0
+		}
+		vector.StrokeLine(screen, sweepCx, sweepCy, tEndX, tEndY, 1, color.RGBA{0, 200, 100, alpha}, false)
+	}
+
+	// Units as glowing dots
 	for _, id := range w.Query(core.CompPosition, core.CompOwner) {
 		pos := w.Get(id, core.CompPosition).(*core.Position)
 		own := w.Get(id, core.CompOwner).(*core.Owner)
 
-		// Scale to minimap
-		dotX := mx + float32(pos.X/64.0)*mw
-		dotY := my + float32(pos.Y/64.0)*mh
+		dotX := float32(mx) + float32(pos.X/64.0)*float32(mw)
+		dotY := float32(my) + float32(pos.Y/64.0)*float32(mh)
 
-		dotClr := color.RGBA{60, 140, 255, 255} // player = blue
+		dotClr := color.RGBA{60, 140, 255, 255}
 		dotR := float32(2)
 		if own.PlayerID != h.LocalPlayer {
-			dotClr = color.RGBA{255, 60, 60, 255} // enemy = red
+			dotClr = color.RGBA{255, 60, 60, 255}
 		}
 		if w.Has(id, core.CompBuilding) {
 			dotR = 3
+			// Glow effect for buildings
+			vector.DrawFilledCircle(screen, dotX, dotY, dotR+2, color.RGBA{dotClr.R, dotClr.G, dotClr.B, 40}, false)
 		}
 
 		vector.DrawFilledCircle(screen, dotX, dotY, dotR, dotClr, false)
 	}
+
+	// Scanline effect
+	scanY := float32(my) + float32(mh)*float32(math.Mod(h.tick*0.3, 1.0))
+	vector.DrawFilledRect(screen, float32(mx), scanY, float32(mw), 1, color.RGBA{0, 255, 0, 15}, false)
 }
 
 // ---- Ore Sparkle Drawing ----
