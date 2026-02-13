@@ -146,7 +146,7 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 				_, _, depth := r.Camera.Project3DToScreen(cx, 0, cz)
 				spriteDraws = append(spriteDraws, spriteDraw{
 					sprite: spr, wx: cx, wy: 0.1, wz: cz,
-					scale: float64(bldg.SizeX) * 1.2, depth: depth,
+					scale: float64(bldg.SizeX) * 1.8, depth: depth,
 				})
 				continue
 			}
@@ -193,9 +193,21 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 			unitType := r.getUnitType(world, id)
 			if spr := r.Sprites.GetUnitSprite(unitType, own.Faction); spr != nil {
 				_, _, depth := r.Camera.Project3DToScreen(pos.X, pos.Z, pos.Y)
+				// Scale: MCV/harvester ~2.5 tiles, tanks ~1.8, infantry ~1.0
+				unitScale := 1.0
+				switch unitType {
+				case "mcv":
+					unitScale = 4.5
+				case "harvester":
+					unitScale = 2.8
+				case "tank":
+					unitScale = 2.5
+				case "infantry":
+					unitScale = 1.5
+				}
 				spriteDraws = append(spriteDraws, spriteDraw{
 					sprite: spr, wx: pos.X, wy: pos.Z + 0.1, wz: pos.Y,
-					scale: 1.0, depth: depth,
+					scale: unitScale, depth: depth,
 				})
 				continue
 			}

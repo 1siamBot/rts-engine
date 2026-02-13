@@ -170,17 +170,16 @@ func (sa *SpriteAtlas) DrawBillboard(screen *ebiten.Image, cam *Camera3D, sprite
 
 	// Project world position to screen
 	sx, sy, depth := cam.Project3DToScreen(worldX, worldY, worldZ)
-	if depth < 0 {
-		return // behind camera
-	}
+	// In orthographic projection, clip.Z ranges [-1, 1]; only skip if outside view volume
+	_ = depth
 
 	// Scale based on distance/zoom
 	imgW := float64(sprite.Bounds().Dx())
 	imgH := float64(sprite.Bounds().Dy())
 
-	// The sprite should cover approximately 'scale' world units
-	// Use the camera's zoom to determine screen-space size
-	pixelsPerUnit := cam.Zoom * 32 // approximate pixels per world unit at current zoom
+	// The sprite should cover approximately 'scale' world units on screen
+	// Zoom = world units across screen width, so pixelsPerUnit = screenW / Zoom
+	pixelsPerUnit := float64(cam.ScreenW) / cam.Zoom
 	targetW := scale * pixelsPerUnit
 	scaleF := targetW / imgW
 	targetH := imgH * scaleF
@@ -188,6 +187,7 @@ func (sa *SpriteAtlas) DrawBillboard(screen *ebiten.Image, cam *Camera3D, sprite
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(scaleF, scaleF)
 	op.GeoM.Translate(float64(sx)-targetW/2, float64(sy)-targetH)
+
 	screen.DrawImage(sprite, op)
 }
 
