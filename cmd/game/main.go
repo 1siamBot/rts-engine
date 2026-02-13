@@ -30,6 +30,13 @@ const (
 	MapSize      = 64
 )
 
+// Screenshot globals
+var (
+	screenshotTarget string
+	screenshotFrame  int
+	frameCount       int
+)
+
 // Game implements ebiten.Game
 type Game struct {
 	renderer *render.IsoRenderer
@@ -709,6 +716,22 @@ func (g *Game) drawProjectiles(screen *ebiten.Image) {
 		vector.DrawFilledCircle(screen, float32(sx), float32(sy), 5, color.RGBA{255, 200, 50, 80}, false)
 		vector.DrawFilledCircle(screen, float32(sx), float32(sy), 3, color.RGBA{255, 255, 100, 255}, false)
 	}
+
+	// Screenshot capture
+	frameCount++
+	if screenshotTarget != "" && frameCount >= screenshotFrame {
+		f, err := os.Create(screenshotTarget)
+		if err != nil {
+			log.Fatalf("Screenshot: %v", err)
+		}
+		if err := png.Encode(f, screen); err != nil {
+			f.Close()
+			log.Fatalf("Screenshot encode: %v", err)
+		}
+		f.Close()
+		log.Printf("Screenshot saved to %s (%dx%d)", screenshotTarget, ScreenWidth, ScreenHeight)
+		os.Exit(0)
+	}
 }
 
 func (g *Game) Layout(_, _ int) (int, int) {
@@ -773,24 +796,12 @@ func main() {
 	}
 
 	if *screenshot != "" || *headless {
-		// Screenshot mode: render 1 frame to PNG without opening a window
-		game := NewGame()
-		offscreen := ebiten.NewImage(ScreenWidth, ScreenHeight)
-		game.Draw(offscreen)
-		outPath := *screenshot
-		if outPath == "" {
-			outPath = "screenshot.png"
+		screenshotPath := *screenshot
+		if screenshotPath == "" {
+			screenshotPath = "screenshot.png"
 		}
-		f, err := os.Create(outPath)
-		if err != nil {
-			log.Fatalf("Failed to create screenshot: %v", err)
-		}
-		defer f.Close()
-		if err := png.Encode(f, offscreen); err != nil {
-			log.Fatalf("Failed to encode screenshot: %v", err)
-		}
-		log.Printf("Screenshot saved to %s", outPath)
-		return
+		screenshotTarget = screenshotPath
+		screenshotFrame = 30 // capture after 30 frames to let game initialize and render properly
 	}
 
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
