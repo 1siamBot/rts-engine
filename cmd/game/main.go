@@ -128,6 +128,9 @@ func NewGame() *Game {
 
 	g.spawnInitialEntities()
 
+	// Mark initial building tiles as occupied
+	g.markInitialBuildingTiles()
+
 	g.gameLoop.Play()
 	return g
 }
@@ -241,6 +244,15 @@ func (g *Game) spawnInitialEntities() {
 	}
 }
 
+func (g *Game) markInitialBuildingTiles() {
+	w := g.gameLoop.World
+	for _, id := range w.Query(core.CompBuilding, core.CompPosition) {
+		pos := w.Get(id, core.CompPosition).(*core.Position)
+		bldg := w.Get(id, core.CompBuilding).(*core.Building)
+		systems.OccupyTiles(g.tileMap, int(pos.X), int(pos.Y), bldg.SizeX, bldg.SizeY)
+	}
+}
+
 func (g *Game) Update() error {
 	g.input.Update()
 	g.hud.Update(1.0 / 60.0)
@@ -249,7 +261,7 @@ func (g *Game) Update() error {
 
 	if g.input.IsKeyJustPressed(ebiten.KeyEscape) {
 		if g.hud.Placement.Active {
-			g.hud.CancelPlacement()
+			g.cancelPlacementWithRefund()
 		} else if g.gameState == "playing" {
 			g.gameState = "paused"
 			g.gameLoop.Pause()
@@ -308,7 +320,7 @@ func (g *Game) Update() error {
 	// Handle right click
 	if g.input.RightJustPressed {
 		if g.hud.Placement.Active {
-			g.hud.CancelPlacement()
+			g.cancelPlacementWithRefund()
 		} else if !g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
 			gx, gy := int(math.Floor(wx)), int(math.Floor(wy))
 			w := g.gameLoop.World
@@ -396,9 +408,36 @@ func (g *Game) startBuildingPurchase(key string) {
 
 func (g *Game) placeBuilding() {
 	key := g.hud.Placement.BuildingKey
-	systems.PlaceBuilding(g.gameLoop.World, key, g.techTree, 0, g.hud.Placement.TileX, g.hud.Placement.TileY, "Allied", g.eventBus)
+	tx, ty := g.hud.Placement.TileX, g.hud.Placement.TileY
+	player := g.players.GetPlayer(0)
+	faction := "Allied"
+	if player != nil {
+		faction = player.Faction
+	}
+
+	systems.PlaceBuilding(g.gameLoop.World, key, g.techTree, 0, tx, ty, faction, g.eventBus)
+
+	// Mark tiles occupied
+	if bdef, ok := g.techTree.Buildings[key]; ok {
+		systems.OccupyTiles(g.tileMap, tx, ty, bdef.SizeX, bdef.SizeY)
+	}
+
 	g.hud.CancelPlacement()
-	g.audioMgr.PlaySFX(audio.SndBuild, float64(g.hud.Placement.TileX), float64(g.hud.Placement.TileY))
+	g.audioMgr.PlaySFX(audio.SndBuild, float64(tx), float64(ty))
+}
+
+func (g *Game) cancelPlacementWithRefund() {
+	if !g.hud.Placement.Active {
+		return
+	}
+	key := g.hud.Placement.BuildingKey
+	if bdef, ok := g.techTree.Buildings[key]; ok {
+		player := g.players.GetPlayer(0)
+		if player != nil {
+			player.Credits += bdef.Cost
+		}
+	}
+	g.hud.CancelPlacement()
 }
 
 func (g *Game) canPlaceBuilding(tileX, tileY, sizeX, sizeY int) bool {
@@ -469,6 +508,8 @@ func (g *Game) trySellBuilding() {
 				pos := w.Get(id, core.CompPosition).(*core.Position)
 				g.hud.AddEffect(pos.X, pos.Y, "explosion", 15)
 				g.renderer.Particles.AddExplosion(pos.X, pos.Y)
+				// Free occupied tiles
+				systems.FreeTiles(g.tileMap, int(pos.X), int(pos.Y), b.SizeX, b.SizeY)
 				systems.SellBuilding(w, id, g.techTree, g.players)
 			}
 		}

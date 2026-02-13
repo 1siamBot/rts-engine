@@ -634,7 +634,7 @@ func (h *HUD) drawBuildingButtons(screen *ebiten.Image, w *core.World, sx, start
 		}
 
 		canAfford := player != nil && player.Credits >= bdef.Cost
-		hasPrereqs := true // simplified
+		hasPrereqs := h.TechTree.HasPrereqs(w, h.LocalPlayer, bdef.Prereqs)
 		enabled := canAfford && hasPrereqs && hasConYard
 
 		btnX := sx + 10
@@ -743,13 +743,15 @@ func max(a, b int) int {
 func (h *HUD) drawUnitButtons(screen *ebiten.Image, w *core.World, sx, startY int, player *core.Player) {
 	y := startY
 	uIdx := 0
-	for _, udef := range h.TechTree.Units {
+	for key, udef := range h.TechTree.Units {
 		if uIdx >= 10 {
 			break
 		}
 
 		canAfford := player != nil && player.Credits >= udef.Cost
-		enabled := canAfford
+		hasPrereqs := h.TechTree.HasPrereqs(w, h.LocalPlayer, udef.Prereqs)
+		hasProdBuilding := systems.FindProductionBuilding(w, h.TechTree, h.LocalPlayer, key) != 0
+		enabled := canAfford && hasPrereqs && hasProdBuilding
 
 		btnX := sx + 10
 		btnY := y
