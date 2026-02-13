@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+            ext: .exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Build game
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -o rts-game-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/game/
+      - name: Build editor
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -o rts-editor-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/editor/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.suffix }}
+          path: |
+            rts-game-${{ matrix.suffix }}${{ matrix.ext }}
+            rts-editor-${{ matrix.suffix }}${{ matrix.ext }}
+
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Build WASM
+        env:
+          GOOS: js
+          GOARCH: wasm
+        run: go build -ldflags="-s -w" -o rts-engine.wasm ./cmd/game/
+      - name: Copy wasm_exec.js
+        run: cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" .
+      - name: Bundle web zip
+        run: |
+          cp web/index.html . 2>/dev/null || cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"><title>RTS Engine</title></head>
+          <body style="margin:0;background:#000">
+          <script src="wasm_exec.js"></script>
+          <script>
+          const go = new Go();
+          WebAssembly.instantiateStreaming(fetch("rts-engine.wasm"), go.importObject).then(r => go.run(r.instance));
+          </script>
+          </body>
+          </html>
+          EOF
+          zip rts-engine-web.zip rts-engine.wasm wasm_exec.js index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-web
+          path: rts-engine-web.zip
+
+  release:
+    needs: [build, build-wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts
+        run: find artifacts -type f | sort
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
