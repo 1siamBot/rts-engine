@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚔️ RTS Engine — One Siam Soft</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: #fff;
+            overflow: hidden;
+        }
+        h1 {
+            font-size: 1.4em;
+            margin-bottom: 10px;
+            color: #4fc3f7;
+            text-shadow: 0 0 20px rgba(79,195,247,0.3);
+        }
+        #game-container {
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(0,100,255,0.15);
+        }
+        canvas {
+            display: block;
+        }
+        .controls {
+            margin-top: 12px;
+            font-size: 0.85em;
+            color: #888;
+            text-align: center;
+        }
+        .controls span { color: #4fc3f7; }
+        #loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #0a0a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 0.5s;
+        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 4px solid #222;
+            border-top: 4px solid #4fc3f7;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #loading p { margin-top: 20px; color: #666; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>⚔️ Loading RTS Engine...</p>
+    </div>
+
+    <h1>⚔️ RTS Engine v0.1.0</h1>
+    <div id="game-container">
+        <canvas id="game"></canvas>
+    </div>
+    <div class="controls">
+        <span>WASD</span> Pan | <span>Scroll</span> Zoom | <span>Left Click</span> Select | <span>Right Click</span> Move | <span>G</span> Grid | <span>M</span> Minimap
+    </div>
+
+    <script src="wasm_exec.js"></script>
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("rts-engine.wasm"), go.importObject).then((result) => {
+            document.getElementById('loading').classList.add('hidden');
+            go.run(result.instance);
+        }).catch(err => {
+            document.getElementById('loading').innerHTML = '<p style="color:#f44">❌ Failed to load: ' + err.message + '</p>';
+        });
+    </script>
+</body>
+</html>

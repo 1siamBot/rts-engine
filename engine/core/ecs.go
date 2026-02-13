@@ -37,6 +37,9 @@ const (
 	CompFogVision
 	CompAnim
 	CompAudio
+	CompMCV
+	CompBuildingConstruction
+	CompBuildingName
 	CompMax
 )
 

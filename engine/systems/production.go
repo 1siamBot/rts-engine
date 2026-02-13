@@ -59,6 +59,7 @@ func NewTechTree() *TechTree {
 	tt.Units["conscript"] = &UnitDef{Name: "Conscript", Cost: 100, BuildTime: 2, HP: 100, Speed: 3.0, Damage: 12, Range: 4.5, ArmorType: core.ArmorNone, DmgType: core.DmgKinetic, MoveType: core.MoveInfantry, Vision: 5, Faction: "Soviet"}
 	tt.Units["rhino"] = &UnitDef{Name: "Rhino Tank", Cost: 900, BuildTime: 10, HP: 500, Speed: 2.0, Damage: 90, Range: 5.5, ArmorType: core.ArmorHeavy, DmgType: core.DmgExplosive, MoveType: core.MoveVehicle, Vision: 6, Faction: "Soviet", Prereqs: []string{"war_factory"}}
 	tt.Units["harvester_s"] = &UnitDef{Name: "War Miner", Cost: 1400, BuildTime: 12, HP: 800, Speed: 1.2, Damage: 20, Range: 3, ArmorType: core.ArmorHeavy, DmgType: core.DmgKinetic, MoveType: core.MoveVehicle, Vision: 4, Faction: "Soviet"}
+	tt.Units["mcv"] = &UnitDef{Name: "MCV", Cost: 3000, BuildTime: 20, HP: 1000, Speed: 0.8, ArmorType: core.ArmorHeavy, MoveType: core.MoveVehicle, Vision: 6, Prereqs: []string{"war_factory"}, Faction: ""}
 
 	// Buildings (shared names, faction handled by Faction field)
 	tt.Buildings["construction_yard"] = &BuildingDef{Name: "Construction Yard", Cost: 0, BuildTime: 0, HP: 1000, SizeX: 3, SizeY: 3, PowerGen: 0, PowerDraw: 0, TechLevel: 0, Faction: ""}
@@ -150,6 +151,11 @@ func (s *ProductionSystem) Update(w *core.World, dt float64) {
 			}
 			w.Attach(uid, &core.Armor{ArmorType: udef.ArmorType})
 
+			// MCV special component
+			if unitName == "mcv" {
+				w.Attach(uid, &core.MCV{CanDeploy: true})
+			}
+
 			if s.EventBus != nil {
 				s.EventBus.Emit(core.Event{Type: core.EvtUnitCreated, Tick: w.TickCount})
 			}
@@ -184,4 +190,177 @@ func (s *PowerSystem) Update(w *core.World, _ float64) {
 		player.Power += b.PowerGen
 		player.PowerUse += b.PowerDraw
 	}
+}
+
+// BuildingConstructionSystem handles building construction animation
+type BuildingConstructionSystem struct{}
+
+func (s *BuildingConstructionSystem) Priority() int { return 6 }
+
+func (s *BuildingConstructionSystem) Update(w *core.World, dt float64) {
+	ids := w.Query(core.CompBuildingConstruction, core.CompHealth)
+	for _, id := range ids {
+		bc := w.Get(id, core.CompBuildingConstruction).(*core.BuildingConstruction)
+		if bc.Complete {
+			continue
+		}
+		bc.Progress += bc.Rate * dt
+		if bc.Progress >= 1.0 {
+			bc.Progress = 1.0
+			bc.Complete = true
+			// Restore full health
+			hp := w.Get(id, core.CompHealth).(*core.Health)
+			hp.Current = hp.Max
+		} else {
+			// Health increases with construction
+			hp := w.Get(id, core.CompHealth).(*core.Health)
+			hp.Current = int(float64(hp.Max) * bc.Progress)
+		}
+	}
+}
+
+// DeployMCV deploys an MCV into a Construction Yard at its current position
+func DeployMCV(w *core.World, mcvID core.EntityID, eventBus *core.EventBus) core.EntityID {
+	pos := w.Get(mcvID, core.CompPosition)
+	own := w.Get(mcvID, core.CompOwner)
+	if pos == nil || own == nil {
+		return 0
+	}
+	p := pos.(*core.Position)
+	o := own.(*core.Owner)
+
+	// Remove MCV
+	w.Destroy(mcvID)
+
+	// Create Construction Yard
+	cyID := w.Spawn()
+	w.Attach(cyID, &core.Position{X: p.X, Y: p.Y})
+	w.Attach(cyID, &core.Health{Current: 100, Max: 1000}) // starts low, builds up
+	w.Attach(cyID, &core.Building{SizeX: 3, SizeY: 3, IsConYard: true, Sellable: true})
+	w.Attach(cyID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: int(p.X) + 3, Y: int(p.Y) + 3}})
+	w.Attach(cyID, &core.Owner{PlayerID: o.PlayerID, Faction: o.Faction})
+	w.Attach(cyID, &core.FogVision{Range: 8})
+	w.Attach(cyID, &core.Selectable{Radius: 1.5})
+	w.Attach(cyID, &core.BuildingName{Key: "construction_yard"})
+	w.Attach(cyID, &core.BuildingConstruction{Progress: 0, Rate: 0.2, Complete: false}) // 5 seconds build
+
+	if eventBus != nil {
+		eventBus.Emit(core.Event{Type: core.EvtBuildingPlaced, Tick: w.TickCount})
+	}
+
+	return cyID
+}
+
+// UndeployConYard turns a Construction Yard back into an MCV
+func UndeployConYard(w *core.World, cyID core.EntityID, eventBus *core.EventBus) core.EntityID {
+	pos := w.Get(cyID, core.CompPosition)
+	own := w.Get(cyID, core.CompOwner)
+	if pos == nil || own == nil {
+		return 0
+	}
+	p := pos.(*core.Position)
+	o := own.(*core.Owner)
+
+	w.Destroy(cyID)
+
+	mcvID := w.Spawn()
+	w.Attach(mcvID, &core.Position{X: p.X, Y: p.Y})
+	w.Attach(mcvID, &core.Health{Current: 1000, Max: 1000})
+	w.Attach(mcvID, &core.Movable{Speed: 0.8, MoveType: core.MoveVehicle})
+	w.Attach(mcvID, &core.Sprite{Width: 32, Height: 32, Visible: true, ScaleX: 1, ScaleY: 1})
+	w.Attach(mcvID, &core.Selectable{Radius: 0.8})
+	w.Attach(mcvID, &core.Owner{PlayerID: o.PlayerID, Faction: o.Faction})
+	w.Attach(mcvID, &core.FogVision{Range: 6})
+	w.Attach(mcvID, &core.MCV{CanDeploy: true})
+	w.Attach(mcvID, &core.Armor{ArmorType: core.ArmorHeavy})
+
+	if eventBus != nil {
+		eventBus.Emit(core.Event{Type: core.EvtUnitCreated, Tick: w.TickCount})
+	}
+	return mcvID
+}
+
+// PlaceBuilding places a building at the given tile position
+func PlaceBuilding(w *core.World, key string, tt *TechTree, playerID int, tileX, tileY int, eventBus *core.EventBus) core.EntityID {
+	bdef, ok := tt.Buildings[key]
+	if !ok {
+		return 0
+	}
+
+	id := w.Spawn()
+	w.Attach(id, &core.Position{X: float64(tileX), Y: float64(tileY)})
+	w.Attach(id, &core.Health{Current: 1, Max: bdef.HP})
+	w.Attach(id, &core.Building{
+		SizeX: bdef.SizeX, SizeY: bdef.SizeY,
+		PowerGen: bdef.PowerGen, PowerDraw: bdef.PowerDraw,
+		TechLevel: bdef.TechLevel, Sellable: true,
+	})
+	w.Attach(id, &core.Owner{PlayerID: playerID, Faction: ""})
+	w.Attach(id, &core.FogVision{Range: 5})
+	w.Attach(id, &core.Selectable{Radius: 1.0})
+	w.Attach(id, &core.BuildingName{Key: key})
+
+	// Construction animation
+	buildRate := 1.0 / bdef.BuildTime // completes in BuildTime seconds
+	w.Attach(id, &core.BuildingConstruction{Progress: 0, Rate: buildRate, Complete: false})
+
+	// Add production if applicable
+	if len(bdef.CanProduce) > 0 {
+		w.Attach(id, &core.Production{Rate: 1.0, Rally: core.TilePos{X: tileX + bdef.SizeX + 1, Y: tileY + bdef.SizeY + 1}})
+	}
+
+	if eventBus != nil {
+		eventBus.Emit(core.Event{Type: core.EvtBuildingPlaced, Tick: w.TickCount})
+	}
+	return id
+}
+
+// SellBuilding sells a building for 50% of its cost
+func SellBuilding(w *core.World, id core.EntityID, tt *TechTree, pm *core.PlayerManager) {
+	own := w.Get(id, core.CompOwner)
+	bn := w.Get(id, core.CompBuildingName)
+	if own == nil {
+		return
+	}
+	o := own.(*core.Owner)
+	player := pm.GetPlayer(o.PlayerID)
+	if player == nil {
+		return
+	}
+	if bn != nil {
+		name := bn.(*core.BuildingName)
+		if bdef, ok := tt.Buildings[name.Key]; ok {
+			player.Credits += bdef.Cost / 2
+		}
+	}
+	w.Destroy(id)
+}
+
+// CanPlaceBuilding checks if a building can be placed at the given tile
+func CanPlaceBuilding(w *core.World, tileX, tileY, sizeX, sizeY, playerID int, tm interface{ InBounds(int, int) bool; IsPassable(int, int, interface{}) bool }) bool {
+	// Check bounds
+	for dy := 0; dy < sizeY; dy++ {
+		for dx := 0; dx < sizeX; dx++ {
+			if !tm.InBounds(tileX+dx, tileY+dy) {
+				return false
+			}
+		}
+	}
+
+	// Check near existing buildings (build radius)
+	nearBuilding := false
+	for _, bid := range w.Query(core.CompBuilding, core.CompOwner, core.CompPosition) {
+		o := w.Get(bid, core.CompOwner).(*core.Owner)
+		if o.PlayerID != playerID {
+			continue
+		}
+		bp := w.Get(bid, core.CompPosition).(*core.Position)
+		dx := float64(tileX) - bp.X
+		dy := float64(tileY) - bp.Y
+		if dx*dx+dy*dy < 100 { // within ~10 tiles
+			nearBuilding = true
+			break
+		}
+	}
+	return nearBuilding
 }

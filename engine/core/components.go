@@ -199,9 +199,40 @@ type Building struct {
 	PowerGen     int    // power generation
 	TechLevel    int
 	Prereqs      []string // required buildings
+	IsConYard    bool     // is this a Construction Yard?
+	Sellable     bool     // can be sold for 50% refund
 }
 
 func (b *Building) Type() ComponentType { return CompBuilding }
+
+// ---- MCV (Mobile Construction Vehicle) ----
+
+// MCV marks a unit as deployable into a Construction Yard
+type MCV struct {
+	CanDeploy bool
+}
+
+func (m *MCV) Type() ComponentType { return CompMCV }
+
+// ---- Building Construction Progress ----
+
+// BuildingConstruction tracks construction animation progress
+type BuildingConstruction struct {
+	Progress float64 // 0.0 to 1.0
+	Rate     float64 // progress per second
+	Complete bool
+}
+
+func (bc *BuildingConstruction) Type() ComponentType { return CompBuildingConstruction }
+
+// ---- Building Name Tag ----
+
+// BuildingName stores the tech-tree key for a building
+type BuildingName struct {
+	Key string
+}
+
+func (bn *BuildingName) Type() ComponentType { return CompBuildingName }
 
 // ---- Harvester ----
 

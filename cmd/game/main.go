@@ -46,7 +46,7 @@ type Game struct {
 	showMinimap bool
 	hoverTileX  int
 	hoverTileY  int
-	gameState   string // "menu", "playing", "paused", "gameover"
+	gameState   string
 
 	// Settings
 	scrollSpeed float64
@@ -77,18 +77,16 @@ func NewGame() *Game {
 		Color: 0xFF0000FF, Credits: 10000, IsAI: true,
 	})
 
-	// Nav grid
 	g.navGrid = pathfind.NewNavGrid(g.tileMap)
 
-	// HUD
 	g.hud = ui.NewHUD(ScreenWidth, ScreenHeight, g.techTree, g.players, 0)
 
-	// Fog of war
 	g.fogSys = systems.NewFogSystem(g.tileMap.Width, g.tileMap.Height, g.players)
 
 	// Register systems
 	w := g.gameLoop.World
 	w.AddSystem(&systems.PowerSystem{Players: g.players})
+	w.AddSystem(&systems.BuildingConstructionSystem{})
 	w.AddSystem(g.fogSys)
 	w.AddSystem(&systems.MovementSystem{NavGrid: g.navGrid})
 	w.AddSystem(&systems.CombatSystem{EventBus: g.eventBus, Players: g.players})
@@ -104,10 +102,8 @@ func NewGame() *Game {
 		Players: g.players,
 	})
 
-	// Center camera
 	g.renderer.Camera.CenterOn(float64(MapSize)/2, float64(MapSize)/2)
 
-	// Spawn initial entities
 	g.spawnInitialEntities()
 
 	g.gameLoop.Play()
@@ -117,43 +113,47 @@ func NewGame() *Game {
 func (g *Game) spawnInitialEntities() {
 	w := g.gameLoop.World
 
-	// Player 0: Construction Yard + units
+	// Player 0: Construction Yard (already deployed from MCV)
 	cyID := w.Spawn()
 	w.Attach(cyID, &core.Position{X: 10, Y: 10})
 	w.Attach(cyID, &core.Health{Current: 1000, Max: 1000})
-	w.Attach(cyID, &core.Building{SizeX: 3, SizeY: 3, PowerGen: 0})
+	w.Attach(cyID, &core.Building{SizeX: 3, SizeY: 3, PowerGen: 0, IsConYard: true, Sellable: true})
 	w.Attach(cyID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 13, Y: 13}})
 	w.Attach(cyID, &core.Owner{PlayerID: 0, Faction: "Allied"})
 	w.Attach(cyID, &core.FogVision{Range: 8})
 	w.Attach(cyID, &core.Selectable{Radius: 1.5})
+	w.Attach(cyID, &core.BuildingName{Key: "construction_yard"})
 
 	// Player 0: Power Plant
 	ppID := w.Spawn()
 	w.Attach(ppID, &core.Position{X: 14, Y: 10})
 	w.Attach(ppID, &core.Health{Current: 750, Max: 750})
-	w.Attach(ppID, &core.Building{SizeX: 2, SizeY: 2, PowerGen: 100})
+	w.Attach(ppID, &core.Building{SizeX: 2, SizeY: 2, PowerGen: 100, Sellable: true})
 	w.Attach(ppID, &core.Owner{PlayerID: 0, Faction: "Allied"})
 	w.Attach(ppID, &core.FogVision{Range: 5})
+	w.Attach(ppID, &core.BuildingName{Key: "power_plant"})
 
-	// Player 0: Barracks with production
+	// Player 0: Barracks
 	barID := w.Spawn()
 	w.Attach(barID, &core.Position{X: 10, Y: 14})
 	w.Attach(barID, &core.Health{Current: 500, Max: 500})
-	w.Attach(barID, &core.Building{SizeX: 2, SizeY: 2, PowerDraw: 20})
+	w.Attach(barID, &core.Building{SizeX: 2, SizeY: 2, PowerDraw: 20, Sellable: true})
 	w.Attach(barID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 12, Y: 16}})
 	w.Attach(barID, &core.Owner{PlayerID: 0, Faction: "Allied"})
 	w.Attach(barID, &core.FogVision{Range: 5})
 	w.Attach(barID, &core.Selectable{Radius: 1.0})
+	w.Attach(barID, &core.BuildingName{Key: "barracks"})
 
 	// Player 0: Refinery
 	refID := w.Spawn()
 	w.Attach(refID, &core.Position{X: 14, Y: 14})
 	w.Attach(refID, &core.Health{Current: 900, Max: 900})
-	w.Attach(refID, &core.Building{SizeX: 3, SizeY: 3, PowerDraw: 30})
+	w.Attach(refID, &core.Building{SizeX: 3, SizeY: 3, PowerDraw: 30, Sellable: true})
 	w.Attach(refID, &core.Owner{PlayerID: 0, Faction: "Allied"})
 	w.Attach(refID, &core.FogVision{Range: 5})
+	w.Attach(refID, &core.BuildingName{Key: "refinery"})
 
-	// Player 0: Starting units
+	// Player 0: Starting infantry
 	for i := 0; i < 5; i++ {
 		uid := w.Spawn()
 		w.Attach(uid, &core.Position{X: float64(8 + i), Y: 13})
@@ -182,10 +182,11 @@ func (g *Game) spawnInitialEntities() {
 	aicyID := w.Spawn()
 	w.Attach(aicyID, &core.Position{X: 54, Y: 54})
 	w.Attach(aicyID, &core.Health{Current: 1000, Max: 1000})
-	w.Attach(aicyID, &core.Building{SizeX: 3, SizeY: 3, PowerGen: 0})
+	w.Attach(aicyID, &core.Building{SizeX: 3, SizeY: 3, PowerGen: 0, IsConYard: true})
 	w.Attach(aicyID, &core.Production{Rate: 1.0, Rally: core.TilePos{X: 52, Y: 52}})
 	w.Attach(aicyID, &core.Owner{PlayerID: 1, Faction: "Soviet"})
 	w.Attach(aicyID, &core.FogVision{Range: 8})
+	w.Attach(aicyID, &core.BuildingName{Key: "construction_yard"})
 
 	aippID := w.Spawn()
 	w.Attach(aippID, &core.Position{X: 50, Y: 54})
@@ -202,7 +203,6 @@ func (g *Game) spawnInitialEntities() {
 	w.Attach(aibarID, &core.Owner{PlayerID: 1, Faction: "Soviet"})
 	w.Attach(aibarID, &core.FogVision{Range: 5})
 
-	// AI starting units
 	for i := 0; i < 5; i++ {
 		uid := w.Spawn()
 		w.Attach(uid, &core.Position{X: float64(52 + i), Y: 52})
@@ -219,9 +219,12 @@ func (g *Game) spawnInitialEntities() {
 
 func (g *Game) Update() error {
 	g.input.Update()
+	g.hud.Update(1.0 / 60.0)
 
 	if g.input.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.gameState == "playing" {
+		if g.hud.Placement.Active {
+			g.hud.CancelPlacement()
+		} else if g.gameState == "playing" {
 			g.gameState = "paused"
 			g.gameLoop.Pause()
 		} else if g.gameState == "paused" {
@@ -249,6 +252,14 @@ func (g *Game) Update() error {
 	g.hoverTileX = int(math.Floor(wx))
 	g.hoverTileY = int(math.Floor(wy))
 
+	// Update placement ghost position
+	if g.hud.Placement.Active {
+		g.hud.Placement.TileX = g.hoverTileX
+		g.hud.Placement.TileY = g.hoverTileY
+		// Validate placement
+		g.hud.Placement.Valid = g.canPlaceBuilding(g.hoverTileX, g.hoverTileY, g.hud.Placement.SizeX, g.hud.Placement.SizeY)
+	}
+
 	// Control groups
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
 	for i := 0; i <= 9; i++ {
@@ -262,44 +273,69 @@ func (g *Game) Update() error {
 		}
 	}
 
-	// Handle right click: move or attack-move selected units
-	if g.input.RightJustPressed && !g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
-		gx, gy := int(math.Floor(wx)), int(math.Floor(wy))
-		w := g.gameLoop.World
-		for _, id := range g.hud.SelectedIDs {
-			if w.Has(id, core.CompMovable) {
-				systems.OrderMove(w, g.navGrid, id, gx, gy)
+	// Deploy MCV hotkey (D key)
+	if g.input.IsKeyJustPressed(ebiten.KeyH) {
+		g.tryDeployMCV()
+	}
+
+	// Sell building hotkey (Delete)
+	if g.input.IsKeyJustPressed(ebiten.KeyDelete) {
+		g.trySellBuilding()
+	}
+
+	// Handle right click
+	if g.input.RightJustPressed {
+		if g.hud.Placement.Active {
+			g.hud.CancelPlacement()
+		} else if !g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
+			gx, gy := int(math.Floor(wx)), int(math.Floor(wy))
+			w := g.gameLoop.World
+			for _, id := range g.hud.SelectedIDs {
+				if w.Has(id, core.CompMovable) {
+					systems.OrderMove(w, g.navGrid, id, gx, gy)
+				}
+			}
+			g.audioMgr.PlaySFX(audio.SndMove, wx, wy)
+		}
+	}
+
+	// Handle left click
+	if g.input.LeftJustReleased && !g.input.Dragging {
+		if g.hud.Placement.Active && g.hud.Placement.Valid {
+			// Place building
+			g.placeBuilding()
+		} else if g.hud.IsInMinimap(g.input.MouseX, g.input.MouseY) {
+			// Click on minimap to move camera
+			wmx, wmy := g.hud.GetMinimapWorldPos(g.input.MouseX, g.input.MouseY, MapSize)
+			g.renderer.Camera.CenterOn(wmx, wmy)
+		} else if !g.hud.HandleClick(g.input.MouseX, g.input.MouseY) {
+			// Check sidebar building/unit click
+			if bKey := g.hud.GetSidebarBuildingClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); bKey != "" {
+				g.startBuildingPurchase(bKey)
+			} else if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY); uKey != "" {
+				g.queueUnit(uKey)
+			} else {
+				shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+				g.handleSelection(wx, wy, shift)
 			}
 		}
-		g.audioMgr.PlaySFX(audio.SndMove, wx, wy)
 	}
 
-	// Handle left click: select
-	if g.input.LeftJustReleased && !g.input.Dragging {
-		if !g.hud.HandleClick(g.input.MouseX, g.input.MouseY) {
-			shift := ebiten.IsKeyPressed(ebiten.KeyShift)
-			g.handleSelection(wx, wy, shift)
-		}
-	}
-
-	// Box select
-	if g.input.LeftJustReleased && g.input.Dragging {
+	// Handle left click placement (also during drag cancel)
+	if g.input.LeftJustReleased && g.input.Dragging && !g.hud.Placement.Active {
 		g.handleBoxSelect()
 	}
 
-	// Queue unit production from barracks (Q key)
+	// Queue unit shortcuts
 	if g.input.IsKeyJustPressed(ebiten.KeyQ) {
 		g.queueUnit("gi")
 	}
 
-	// Update audio listener
 	g.audioMgr.SetCameraPos(g.renderer.Camera.X, g.renderer.Camera.Y)
 
-	// Simulation tick
 	g.gameLoop.Update()
 	g.eventBus.Dispatch()
 
-	// Check game over
 	for _, p := range g.players.Players {
 		if p.Defeated && p.ID == 0 {
 			g.gameState = "gameover"
@@ -309,6 +345,94 @@ func (g *Game) Update() error {
 	return nil
 }
 
+func (g *Game) startBuildingPurchase(key string) {
+	bdef, ok := g.techTree.Buildings[key]
+	if !ok {
+		return
+	}
+	player := g.players.GetPlayer(0)
+	if player == nil || player.Credits < bdef.Cost {
+		return
+	}
+	player.Credits -= bdef.Cost
+	g.hud.StartPlacement(key)
+}
+
+func (g *Game) placeBuilding() {
+	key := g.hud.Placement.BuildingKey
+	systems.PlaceBuilding(g.gameLoop.World, key, g.techTree, 0, g.hud.Placement.TileX, g.hud.Placement.TileY, g.eventBus)
+	g.hud.CancelPlacement()
+	g.audioMgr.PlaySFX(audio.SndBuild, float64(g.hud.Placement.TileX), float64(g.hud.Placement.TileY))
+}
+
+func (g *Game) canPlaceBuilding(tileX, tileY, sizeX, sizeY int) bool {
+	// Check bounds and terrain
+	for dy := 0; dy < sizeY; dy++ {
+		for dx := 0; dx < sizeX; dx++ {
+			tx, ty := tileX+dx, tileY+dy
+			if !g.tileMap.InBounds(tx, ty) {
+				return false
+			}
+			tile := g.tileMap.At(tx, ty)
+			if tile == nil || tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater || tile.Terrain == maplib.TerrainCliff {
+				return false
+			}
+		}
+	}
+	// Check near existing buildings
+	w := g.gameLoop.World
+	nearBuilding := false
+	for _, bid := range w.Query(core.CompBuilding, core.CompOwner, core.CompPosition) {
+		o := w.Get(bid, core.CompOwner).(*core.Owner)
+		if o.PlayerID != 0 {
+			continue
+		}
+		bp := w.Get(bid, core.CompPosition).(*core.Position)
+		dx := float64(tileX) - bp.X
+		dy := float64(tileY) - bp.Y
+		if dx*dx+dy*dy < 100 {
+			nearBuilding = true
+			break
+		}
+	}
+	return nearBuilding
+}
+
+func (g *Game) tryDeployMCV() {
+	w := g.gameLoop.World
+	for _, id := range g.hud.SelectedIDs {
+		if w.Has(id, core.CompMCV) {
+			systems.DeployMCV(w, id, g.eventBus)
+			g.hud.SelectedIDs = nil
+			return
+		}
+		// Undeploy con yard
+		if bldg := w.Get(id, core.CompBuilding); bldg != nil {
+			b := bldg.(*core.Building)
+			if b.IsConYard {
+				systems.UndeployConYard(w, id, g.eventBus)
+				g.hud.SelectedIDs = nil
+				return
+			}
+		}
+	}
+}
+
+func (g *Game) trySellBuilding() {
+	w := g.gameLoop.World
+	for _, id := range g.hud.SelectedIDs {
+		if bldg := w.Get(id, core.CompBuilding); bldg != nil {
+			b := bldg.(*core.Building)
+			if b.Sellable {
+				pos := w.Get(id, core.CompPosition).(*core.Position)
+				g.hud.AddEffect(pos.X, pos.Y, "explosion", 15)
+				systems.SellBuilding(w, id, g.techTree, g.players)
+			}
+		}
+	}
+	g.hud.SelectedIDs = nil
+}
+
 func (g *Game) queueUnit(unitType string) {
 	w := g.gameLoop.World
 	player := g.players.GetPlayer(0)
@@ -316,7 +440,6 @@ func (g *Game) queueUnit(unitType string) {
 	if !ok || player.Credits < udef.Cost {
 		return
 	}
-	// Find a production building
 	for _, id := range w.Query(core.CompProduction, core.CompOwner) {
 		own := w.Get(id, core.CompOwner).(*core.Owner)
 		if own.PlayerID != 0 {
@@ -418,18 +541,19 @@ func (g *Game) handleCamera() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	screen.Fill(color.RGBA{20, 20, 30, 255})
+	screen.Fill(color.RGBA{12, 12, 20, 255})
 
-	// Draw map
-	g.renderer.DrawMap(screen, g.tileMap)
+	// Draw map with terrain effects
+	g.drawMapWithEffects(screen)
+
 	if g.showGrid {
 		g.renderer.DrawGrid(screen, g.tileMap)
 	}
 
-	// Draw fog of war overlay
+	// Fog of war
 	g.drawFogOverlay(screen)
 
-	// Draw hover tile
+	// Hover tile highlight
 	if g.tileMap.InBounds(g.hoverTileX, g.hoverTileY) {
 		sx, sy := g.renderer.Camera.WorldToScreen(float64(g.hoverTileX), float64(g.hoverTileY))
 		tw := float32(g.tileMap.TileWidth)
@@ -438,52 +562,41 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		hh := th / 2
 		cx := float32(sx)
 		cy := float32(sy) + hh
-		hoverColor := color.RGBA{255, 255, 0, 100}
+		hoverColor := color.RGBA{255, 255, 0, 60}
 		vector.StrokeLine(screen, cx, cy-hh, cx+hw, cy, 2, hoverColor, false)
 		vector.StrokeLine(screen, cx+hw, cy, cx, cy+hh, 2, hoverColor, false)
 		vector.StrokeLine(screen, cx, cy+hh, cx-hw, cy, 2, hoverColor, false)
 		vector.StrokeLine(screen, cx-hw, cy, cx, cy-hh, 2, hoverColor, false)
 	}
 
-	// Draw entities
-	g.drawEntities(screen)
+	// Draw entities via HUD (handles selection circles, health bars, effects)
+	worldToScreen := func(wx, wy float64) (int, int) {
+		return g.renderer.Camera.WorldToScreen(wx, wy)
+	}
+	g.hud.DrawWorldEffects(screen, g.gameLoop.World, worldToScreen)
 
-	// Draw projectiles
+	// Projectiles
 	g.drawProjectiles(screen)
 
-	// Draw selection box
-	if x1, y1, x2, y2, active := g.input.DragRect(); active {
+	// Placement ghost
+	g.hud.DrawPlacementGhost(screen, worldToScreen)
+
+	// Selection box
+	if x1, y1, x2, y2, active := g.input.DragRect(); active && !g.hud.Placement.Active {
 		g.renderer.DrawSelectionBox(screen, x1, y1, x2, y2)
 	}
 
-	// Minimap
-	if g.showMinimap {
-		g.renderer.DrawMinimap(screen, g.tileMap, ScreenWidth-g.hud.SidebarWidth-170, ScreenHeight-170, 160)
-	}
-
-	// HUD
+	// HUD panels
 	g.hud.Draw(screen, g.gameLoop.World)
 
-	// Top-left debug info
-	tile := g.tileMap.At(g.hoverTileX, g.hoverTileY)
-	terrainName := "OOB"
-	if tile != nil {
-		terrainName = terrainTypeName(tile.Terrain)
+	// Placement mode indicator
+	if g.hud.Placement.Active {
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Placing: %s (Click to place, ESC/Right-click to cancel)", g.hud.Placement.BuildingKey), 10, ScreenHeight-20)
 	}
-	info := fmt.Sprintf(
-		"RTS Engine v0.2.0 | FPS: %.0f | Tick: %d | State: %s\n"+
-			"Tile: (%d,%d) %s | Entities: %d | Selected: %d\n"+
-			"Zoom: %.1fx | [WASD]Pan [G]Grid [M]Minimap [Q]Train GI [ESC]Pause",
-		ebiten.ActualFPS(), g.gameLoop.CurrentTick(), g.gameState,
-		g.hoverTileX, g.hoverTileY, terrainName,
-		g.gameLoop.World.EntityCount(), len(g.hud.SelectedIDs),
-		g.renderer.Camera.Zoom,
-	)
-	ebitenutil.DebugPrintAt(screen, info, 5, 35)
 
 	// Pause/GameOver overlay
 	if g.gameState == "paused" {
-		g.drawOverlay(screen, "PAUSED", "Press ESC to resume")
+		g.drawOverlay(screen, "⏸ PAUSED", "Press ESC to resume")
 	}
 	if g.gameState == "gameover" {
 		winner := "Enemy"
@@ -495,12 +608,62 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 }
 
+func (g *Game) drawMapWithEffects(screen *ebiten.Image) {
+	tm := g.tileMap
+	tw := tm.TileWidth
+	th := tm.TileHeight
+
+	g.renderer.Camera.SetMapBounds(tm.Width, tm.Height, tw, th)
+	minX, minY, maxX, maxY := g.renderer.Camera.VisibleTileRange(tm.Width, tm.Height)
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			tile := tm.At(x, y)
+			if tile == nil {
+				continue
+			}
+			sx, sy := g.renderer.Camera.WorldToScreen(float64(x), float64(y))
+			sy -= int(tile.Height) * (th / 4)
+			sx -= tw / 2
+
+			tileImg := g.renderer.GetTileImage(tile.Terrain, tw, th)
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(float64(sx), float64(sy))
+			screen.DrawImage(tileImg, op)
+
+			// Water animation
+			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
+				g.hud.DrawWaterEffect(screen, sx, sy, tw, th)
+			}
+
+			// Ore sparkle
+			if tile.OreAmount > 0 {
+				g.hud.DrawOreSparkles(screen, x, y, tile.OreAmount, sx+tw/2, sy+th/2)
+			}
+		}
+	}
+}
+
 func (g *Game) drawOverlay(screen *ebiten.Image, title, subtitle string) {
 	overlay := ebiten.NewImage(ScreenWidth, ScreenHeight)
 	overlay.Fill(color.RGBA{0, 0, 0, 150})
 	screen.DrawImage(overlay, nil)
-	ebitenutil.DebugPrintAt(screen, title, ScreenWidth/2-30, ScreenHeight/2-20)
-	ebitenutil.DebugPrintAt(screen, subtitle, ScreenWidth/2-40, ScreenHeight/2)
+
+	// Centered overlay box
+	boxW := float32(300)
+	boxH := float32(100)
+	boxX := float32(ScreenWidth)/2 - boxW/2
+	boxY := float32(ScreenHeight)/2 - boxH/2
+	vector.DrawFilledRect(screen, boxX, boxY, boxW, boxH, color.RGBA{15, 15, 30, 240}, false)
+	vector.StrokeRect(screen, boxX, boxY, boxW, boxH, 2, color.RGBA{0, 180, 220, 255}, false)
+
+	ebitenutil.DebugPrintAt(screen, title, int(boxX)+boxW_center(title, boxW), int(boxY)+25)
+	ebitenutil.DebugPrintAt(screen, subtitle, int(boxX)+boxW_center(subtitle, boxW), int(boxY)+50)
+}
+
+func boxW_center(text string, boxW float32) int {
+	textW := len(text) * 6
+	return int(boxW/2) - textW/2
 }
 
 func (g *Game) drawFogOverlay(screen *ebiten.Image) {
@@ -523,137 +686,13 @@ func (g *Game) drawFogOverlay(screen *ebiten.Image) {
 			if state == systems.FogShroud {
 				alpha = 200
 			} else {
-				alpha = 100
+				alpha = 80
 			}
 			fogImg := ebiten.NewImage(tw, th)
-			fogImg.Fill(color.RGBA{0, 0, 0, alpha})
+			fogImg.Fill(color.RGBA{5, 5, 15, alpha})
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(float64(sx), float64(sy))
 			screen.DrawImage(fogImg, op)
-		}
-	}
-}
-
-func (g *Game) drawEntities(screen *ebiten.Image) {
-	w := g.gameLoop.World
-	fog := g.fogSys.Fogs[0]
-
-	// Draw buildings
-	for _, id := range w.Query(core.CompPosition, core.CompBuilding, core.CompOwner) {
-		pos := w.Get(id, core.CompPosition).(*core.Position)
-		own := w.Get(id, core.CompOwner).(*core.Owner)
-
-		// Fog check
-		if fog != nil && !fog.IsVisible(int(pos.X), int(pos.Y)) && own.PlayerID != 0 {
-			continue
-		}
-
-		sx, sy := g.renderer.Camera.WorldToScreen(pos.X, pos.Y)
-		bldg := w.Get(id, core.CompBuilding).(*core.Building)
-		bw := float32(bldg.SizeX * 20)
-		bh := float32(bldg.SizeY * 12)
-
-		bcolor := color.RGBA{60, 60, 200, 255}
-		if own.PlayerID == 1 {
-			bcolor = color.RGBA{200, 60, 60, 255}
-		}
-
-		vector.DrawFilledRect(screen, float32(sx)-bw/2, float32(sy)-bh/2, bw, bh, bcolor, false)
-		vector.StrokeRect(screen, float32(sx)-bw/2, float32(sy)-bh/2, bw, bh, 1, color.RGBA{255, 255, 255, 150}, false)
-
-		// Health bar
-		hp := w.Get(id, core.CompHealth)
-		if hp != nil {
-			h := hp.(*core.Health)
-			ratio := float32(h.Ratio())
-			vector.DrawFilledRect(screen, float32(sx)-bw/2, float32(sy)-bh/2-5, bw*ratio, 3, color.RGBA{0, 200, 0, 255}, false)
-		}
-
-		// Production progress
-		if prod := w.Get(id, core.CompProduction); prod != nil {
-			p := prod.(*core.Production)
-			if len(p.Queue) > 0 {
-				vector.DrawFilledRect(screen, float32(sx)-bw/2, float32(sy)+bh/2+2, bw*float32(p.Progress), 3, color.RGBA{255, 255, 0, 255}, false)
-			}
-		}
-
-		// Check if selected
-		for _, sid := range g.hud.SelectedIDs {
-			if sid == id {
-				vector.StrokeRect(screen, float32(sx)-bw/2-2, float32(sy)-bh/2-2, bw+4, bh+4, 2, color.RGBA{0, 255, 0, 200}, false)
-				break
-			}
-		}
-	}
-
-	// Draw units (non-buildings with Position + Selectable)
-	for _, id := range w.Query(core.CompPosition, core.CompSelectable, core.CompOwner) {
-		if w.Has(id, core.CompBuilding) {
-			continue
-		}
-		pos := w.Get(id, core.CompPosition).(*core.Position)
-		own := w.Get(id, core.CompOwner).(*core.Owner)
-
-		// Fog check
-		if fog != nil && !fog.IsVisible(int(pos.X), int(pos.Y)) && own.PlayerID != 0 {
-			continue
-		}
-
-		sx, sy := g.renderer.Camera.WorldToScreen(pos.X, pos.Y)
-
-		selected := false
-		for _, sid := range g.hud.SelectedIDs {
-			if sid == id {
-				selected = true
-				break
-			}
-		}
-
-		if selected {
-			vector.DrawFilledCircle(screen, float32(sx), float32(sy), 16, color.RGBA{0, 255, 0, 60}, false)
-			vector.StrokeCircle(screen, float32(sx), float32(sy), 16, 2, color.RGBA{0, 255, 0, 200}, false)
-		}
-
-		unitColor := color.RGBA{60, 120, 255, 255}
-		if own.PlayerID == 1 {
-			unitColor = color.RGBA{255, 60, 60, 255}
-		}
-
-		// Harvester: slightly bigger
-		radius := float32(10)
-		if w.Has(id, core.CompHarvester) {
-			radius = 13
-			unitColor.G = 200
-		}
-
-		vector.DrawFilledCircle(screen, float32(sx), float32(sy), radius, unitColor, false)
-		vector.StrokeCircle(screen, float32(sx), float32(sy), radius, 1, color.RGBA{255, 255, 255, 180}, false)
-
-		// Health bar
-		if hp := w.Get(id, core.CompHealth); hp != nil {
-			h := hp.(*core.Health)
-			ratio := float32(h.Ratio())
-			barW := float32(24)
-			barX := float32(sx) - barW/2
-			barY := float32(sy) - radius - 6
-			vector.DrawFilledRect(screen, barX, barY, barW, 3, color.RGBA{40, 40, 40, 200}, false)
-			barColor := color.RGBA{0, 200, 0, 255}
-			if ratio < 0.5 {
-				barColor = color.RGBA{255, 200, 0, 255}
-			}
-			if ratio < 0.25 {
-				barColor = color.RGBA{255, 0, 0, 255}
-			}
-			vector.DrawFilledRect(screen, barX, barY, barW*ratio, 3, barColor, false)
-		}
-
-		// Harvester load indicator
-		if harv := w.Get(id, core.CompHarvester); harv != nil {
-			h := harv.(*core.Harvester)
-			if h.Current > 0 {
-				loadRatio := float32(h.Current) / float32(h.Capacity)
-				vector.DrawFilledRect(screen, float32(sx)-12, float32(sy)+radius+2, 24*loadRatio, 2, color.RGBA{255, 215, 0, 255}, false)
-			}
 		}
 	}
 }
@@ -663,6 +702,8 @@ func (g *Game) drawProjectiles(screen *ebiten.Image) {
 	for _, id := range w.Query(core.CompPosition, core.CompProjectile) {
 		pos := w.Get(id, core.CompPosition).(*core.Position)
 		sx, sy := g.renderer.Camera.WorldToScreen(pos.X, pos.Y)
+		// Glow effect
+		vector.DrawFilledCircle(screen, float32(sx), float32(sy), 5, color.RGBA{255, 200, 50, 80}, false)
 		vector.DrawFilledCircle(screen, float32(sx), float32(sy), 3, color.RGBA{255, 255, 100, 255}, false)
 	}
 }
@@ -718,23 +759,9 @@ func generateDemoMap() *maplib.TileMap {
 	return tm
 }
 
-func terrainTypeName(t maplib.TerrainType) string {
-	names := map[maplib.TerrainType]string{
-		maplib.TerrainGrass: "Grass", maplib.TerrainDirt: "Dirt", maplib.TerrainSand: "Sand",
-		maplib.TerrainWater: "Water", maplib.TerrainDeepWater: "Deep Water", maplib.TerrainRock: "Rock",
-		maplib.TerrainCliff: "Cliff", maplib.TerrainRoad: "Road", maplib.TerrainBridge: "Bridge",
-		maplib.TerrainOre: "Ore Field", maplib.TerrainGem: "Gem Field", maplib.TerrainSnow: "Snow",
-		maplib.TerrainUrban: "Urban", maplib.TerrainForest: "Forest",
-	}
-	if name, ok := names[t]; ok {
-		return name
-	}
-	return "Unknown"
-}
-
 func main() {
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
-	ebiten.SetWindowTitle("⚔️ RTS Engine v0.2.0 — Full Game")
+	ebiten.SetWindowTitle("⚔️ RTS Engine v0.3.0 — Modern Casual UI + MCV")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetVsyncEnabled(true)
 
