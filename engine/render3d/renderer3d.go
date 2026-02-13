@@ -88,7 +88,7 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 	// 1. Terrain (cached, regenerated every 0.5s for water animation)
 	minX, minY, maxX, maxY := r.Camera.VisibleTileRange(tm.Width, tm.Height)
 	cacheKey := fmt.Sprintf("%d,%d,%d,%d", minX, minY, maxX, maxY)
-	if r.terrainCache == nil || r.terrainCacheKey != cacheKey || r.time-r.terrainCacheTime > 0.5 {
+	if r.terrainCache == nil || r.terrainCacheKey != cacheKey || r.time-r.terrainCacheTime > 2.0 {
 		r.terrainCache = GenerateTerrainMesh(tm, minX, minY, maxX, maxY, r.time)
 		r.terrainCacheKey = cacheKey
 		r.terrainCacheTime = r.time
@@ -299,7 +299,7 @@ func (r *Renderer3D) drawSelectionCircles(screen *ebiten.Image, world *core.Worl
 	}
 }
 
-// renderMesh projects and draws a 3D mesh to the screen
+// renderMesh projects and draws a 3D mesh to the screen (batched)
 func (r *Renderer3D) renderMesh(screen *ebiten.Image, mesh *Mesh3D) {
 	if len(mesh.Triangles) == 0 {
 		return
@@ -309,21 +309,22 @@ func (r *Renderer3D) renderMesh(screen *ebiten.Image, mesh *Mesh3D) {
 	sw := float64(r.Camera.ScreenW)
 	sh := float64(r.Camera.ScreenH)
 
+	// Pre-allocate batch buffers
+	vertices := make([]ebiten.Vertex, 0, len(mesh.Triangles)*3)
+	indices := make([]uint16, 0, len(mesh.Triangles)*3)
+
 	for _, tri := range mesh.Triangles {
 		var vs [3]ebiten.Vertex
 		allOffScreen := true
 
 		for i := 0; i < 3; i++ {
 			v := tri.V[i]
-			// Apply lighting
 			litColor := r.Lighting.ComputeLighting(v.Normal, v.Color)
 
-			// Project to screen
 			clip := vp.TransformPoint(v.Pos)
 			sx := (clip.X*0.5 + 0.5) * sw
 			sy := (1 - (clip.Y*0.5 + 0.5)) * sh
 
-			// Clip check (rough)
 			if sx >= -100 && sx <= sw+100 && sy >= -100 && sy <= sh+100 {
 				allOffScreen = false
 			}
@@ -344,19 +345,31 @@ func (r *Renderer3D) renderMesh(screen *ebiten.Image, mesh *Mesh3D) {
 			continue
 		}
 
-		// Back-face culling (screen-space winding order)
+		// Back-face culling (screen-space winding order, Y-down)
 		ax := vs[1].DstX - vs[0].DstX
 		ay := vs[1].DstY - vs[0].DstY
 		bx := vs[2].DstX - vs[0].DstX
 		by := vs[2].DstY - vs[0].DstY
-		// Skip degenerate triangles only (no back-face culling — mixed winding)
 		cross := ax*by - ay*bx
-		if cross > -0.5 && cross < 0.5 {
-			continue // degenerate
+		if cross < 0.5 {
+			continue // back-face or degenerate
 		}
 
-		indices := []uint16{0, 1, 2}
-		screen.DrawTriangles(vs[:], indices, r.whiteImg, nil)
+		// Add to batch
+		base := uint16(len(vertices))
+		vertices = append(vertices, vs[0], vs[1], vs[2])
+		indices = append(indices, base, base+1, base+2)
+
+		// Flush if approaching uint16 limit
+		if len(vertices) >= 65000 {
+			screen.DrawTriangles(vertices, indices, r.whiteImg, nil)
+			vertices = vertices[:0]
+			indices = indices[:0]
+		}
+	}
+
+	if len(vertices) > 0 {
+		screen.DrawTriangles(vertices, indices, r.whiteImg, nil)
 	}
 }
 
@@ -385,12 +398,8 @@ func (r *Renderer3D) DrawSelectionBox(screen *ebiten.Image, x1, y1, x2, y2 int) 
 		y1, y2 = y2, y1
 	}
 	selColor := color.RGBA{0, 255, 0, 128}
-	fillColor := color.RGBA{0, 255, 0, 30}
-	fillImg := ebiten.NewImage(x2-x1, y2-y1)
-	fillImg.Fill(fillColor)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(float64(x1), float64(y1))
-	screen.DrawImage(fillImg, op)
+	// Fill using semi-transparent rect
+	vector.DrawFilledRect(screen, float32(x1), float32(y1), float32(x2-x1), float32(y2-y1), color.RGBA{0, 255, 0, 30}, false)
 	vector.StrokeLine(screen, float32(x1), float32(y1), float32(x2), float32(y1), 1, selColor, false)
 	vector.StrokeLine(screen, float32(x2), float32(y1), float32(x2), float32(y2), 1, selColor, false)
 	vector.StrokeLine(screen, float32(x2), float32(y2), float32(x1), float32(y2), 1, selColor, false)

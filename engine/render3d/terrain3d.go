@@ -6,22 +6,22 @@ import (
 	"github.com/1siamBot/rts-engine/engine/maplib"
 )
 
-// TerrainColors maps terrain to bright, vivid base colors
+// TerrainColors maps terrain to natural, moderate base colors
 var TerrainBaseColors = map[maplib.TerrainType]Color3{
-	maplib.TerrainGrass:     {0.38, 0.82, 0.28},
-	maplib.TerrainDirt:      {0.72, 0.58, 0.38},
-	maplib.TerrainSand:      {0.95, 0.88, 0.62},
-	maplib.TerrainWater:     {0.25, 0.60, 0.95},
-	maplib.TerrainDeepWater: {0.12, 0.30, 0.78},
-	maplib.TerrainRock:      {0.65, 0.63, 0.60},
-	maplib.TerrainCliff:     {0.58, 0.54, 0.48},
-	maplib.TerrainRoad:      {0.70, 0.68, 0.65},
-	maplib.TerrainBridge:    {0.68, 0.50, 0.28},
-	maplib.TerrainOre:       {0.92, 0.82, 0.18},
-	maplib.TerrainGem:       {0.18, 0.90, 0.90},
-	maplib.TerrainSnow:      {0.96, 0.96, 0.98},
-	maplib.TerrainUrban:     {0.75, 0.73, 0.70},
-	maplib.TerrainForest:    {0.20, 0.65, 0.15},
+	maplib.TerrainGrass:     {0.30, 0.55, 0.22},
+	maplib.TerrainDirt:      {0.55, 0.42, 0.28},
+	maplib.TerrainSand:      {0.78, 0.72, 0.50},
+	maplib.TerrainWater:     {0.18, 0.42, 0.72},
+	maplib.TerrainDeepWater: {0.10, 0.22, 0.58},
+	maplib.TerrainRock:      {0.50, 0.48, 0.45},
+	maplib.TerrainCliff:     {0.45, 0.42, 0.38},
+	maplib.TerrainRoad:      {0.55, 0.53, 0.50},
+	maplib.TerrainBridge:    {0.52, 0.38, 0.22},
+	maplib.TerrainOre:       {0.72, 0.62, 0.15},
+	maplib.TerrainGem:       {0.15, 0.68, 0.68},
+	maplib.TerrainSnow:      {0.82, 0.82, 0.85},
+	maplib.TerrainUrban:     {0.58, 0.56, 0.54},
+	maplib.TerrainForest:    {0.16, 0.48, 0.12},
 }
 
 // perlinNoise simple hash-based noise for height variation

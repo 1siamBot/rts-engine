@@ -23,22 +23,22 @@ type LightingSetup struct {
 	HasFill  bool
 }
 
-// DefaultLighting returns a bright, game-friendly RTS lighting setup
+// DefaultLighting returns a balanced RTS lighting setup (not over-bright)
 func DefaultLighting() LightingSetup {
 	return LightingSetup{
 		Sun: DirectionalLight{
 			Direction: V3(-0.4, 0.85, -0.35).Normalize(),
-			Color:     Color3{1.0, 0.98, 0.92},
-			Intensity: 1.1,
+			Color:     Color3{1.0, 0.97, 0.90},
+			Intensity: 0.65,
 		},
 		Fill: DirectionalLight{
 			Direction: V3(0.5, 0.4, 0.6).Normalize(),
-			Color:     Color3{0.7, 0.8, 1.0},
-			Intensity: 0.45,
+			Color:     Color3{0.6, 0.7, 0.9},
+			Intensity: 0.20,
 		},
 		Ambient: AmbientLight{
-			Color:     Color3{0.75, 0.78, 0.85},
-			Intensity: 0.60,
+			Color:     Color3{0.65, 0.68, 0.75},
+			Intensity: 0.35,
 		},
 		HasFill: true,
 	}

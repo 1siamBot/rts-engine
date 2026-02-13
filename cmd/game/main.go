@@ -59,6 +59,10 @@ type Game struct {
 
 	// Settings
 	scrollSpeed float64
+
+	// Cached images
+	fogWhiteImg   *ebiten.Image
+	selectionFill *ebiten.Image
 }
 
 func NewGame() *Game {
@@ -119,6 +123,7 @@ func NewGame() *Game {
 		Players: g.players,
 	})
 
+	g.renderer.Camera.SetMapSize(MapSize, MapSize)
 	g.renderer.Camera.CenterOn(12, 12)
 
 	g.spawnInitialEntities()
@@ -238,6 +243,7 @@ func (g *Game) Update() error {
 	g.input.Update()
 	g.hud.Update(1.0 / 60.0)
 	g.renderer.Update(1.0 / 60.0)
+	g.renderer.Camera.SmoothUpdate(1.0 / 60.0)
 
 	if g.input.IsKeyJustPressed(ebiten.KeyEscape) {
 		if g.hud.Placement.Active {
@@ -688,45 +694,65 @@ func (g *Game) drawFogOverlay(screen *ebiten.Image) {
 	if fog == nil {
 		return
 	}
+
+	// Reuse cached white image
+	if g.fogWhiteImg == nil {
+		g.fogWhiteImg = ebiten.NewImage(4, 4)
+		g.fogWhiteImg.Fill(color.White)
+	}
+
 	minX, minY, maxX, maxY := g.renderer.Camera.VisibleTileRange(g.tileMap.Width, g.tileMap.Height)
+
+	// Batch fog triangles
+	var vertices []ebiten.Vertex
+	var indices []uint16
+
+	shroudR := float32(5) / 255
+	shroudG := float32(5) / 255
+	shroudB := float32(15) / 255
+
 	for y := minY; y <= maxY; y++ {
 		for x := minX; x <= maxX; x++ {
 			state := fog.At(x, y)
 			if state == systems.FogVisible {
 				continue
 			}
-			var alpha uint8
+			var alphaF float32
 			if state == systems.FogShroud {
-				alpha = 200
+				alphaF = float32(200) / 255
 			} else {
-				alpha = 80
+				alphaF = float32(80) / 255
 			}
 
-			// Draw fog quad over tile
 			fx, fy := float64(x), float64(y)
 			s0x, s0y, _ := g.renderer.Camera.Project3DToScreen(fx, 0.05, fy)
 			s1x, s1y, _ := g.renderer.Camera.Project3DToScreen(fx+1, 0.05, fy)
 			s2x, s2y, _ := g.renderer.Camera.Project3DToScreen(fx+1, 0.05, fy+1)
 			s3x, s3y, _ := g.renderer.Camera.Project3DToScreen(fx, 0.05, fy+1)
 
-			fogColor := color.RGBA{5, 5, 15, alpha}
+			base := uint16(len(vertices))
+			vertices = append(vertices,
+				ebiten.Vertex{DstX: float32(s0x), DstY: float32(s0y), SrcX: 1, SrcY: 1, ColorR: shroudR, ColorG: shroudG, ColorB: shroudB, ColorA: alphaF},
+				ebiten.Vertex{DstX: float32(s1x), DstY: float32(s1y), SrcX: 1, SrcY: 1, ColorR: shroudR, ColorG: shroudG, ColorB: shroudB, ColorA: alphaF},
+				ebiten.Vertex{DstX: float32(s2x), DstY: float32(s2y), SrcX: 1, SrcY: 1, ColorR: shroudR, ColorG: shroudG, ColorB: shroudB, ColorA: alphaF},
+				ebiten.Vertex{DstX: float32(s3x), DstY: float32(s3y), SrcX: 1, SrcY: 1, ColorR: shroudR, ColorG: shroudG, ColorB: shroudB, ColorA: alphaF},
+			)
+			indices = append(indices, base, base+1, base+2, base, base+2, base+3)
 
-			// Draw as two triangles
-			vs := [4]ebiten.Vertex{
-				{DstX: float32(s0x), DstY: float32(s0y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
-				{DstX: float32(s1x), DstY: float32(s1y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
-				{DstX: float32(s2x), DstY: float32(s2y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
-				{DstX: float32(s3x), DstY: float32(s3y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
+			if len(vertices) >= 65000 {
+				op := &ebiten.DrawTrianglesOptions{}
+				op.Blend = ebiten.BlendSourceOver
+				screen.DrawTriangles(vertices, indices, g.fogWhiteImg, op)
+				vertices = vertices[:0]
+				indices = indices[:0]
 			}
-
-			whiteImg := ebiten.NewImage(4, 4)
-			whiteImg.Fill(color.White)
-
-			indices := []uint16{0, 1, 2, 0, 2, 3}
-			op := &ebiten.DrawTrianglesOptions{}
-			op.Blend = ebiten.BlendSourceOver
-			screen.DrawTriangles(vs[:], indices, whiteImg, op)
 		}
+	}
+
+	if len(vertices) > 0 {
+		op := &ebiten.DrawTrianglesOptions{}
+		op.Blend = ebiten.BlendSourceOver
+		screen.DrawTriangles(vertices, indices, g.fogWhiteImg, op)
 	}
 }
 

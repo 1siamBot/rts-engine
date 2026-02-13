@@ -7,8 +7,11 @@ type Camera3D struct {
 	// Camera target (world position to look at)
 	TargetX, TargetY float64
 
-	// Zoom: how many world units fit on screen
+	// Zoom: how many world units fit on screen width
 	Zoom float64
+
+	// Smooth zoom target (for interpolation)
+	zoomTarget float64
 
 	// Screen dimensions
 	ScreenW, ScreenH int
@@ -18,23 +21,35 @@ type Camera3D struct {
 	Yaw   float64 // 45° for classic isometric
 
 	// Computed matrices
-	view       Mat4
-	proj       Mat4
-	viewProj   Mat4
-	dirty      bool
+	view     Mat4
+	proj     Mat4
+	viewProj Mat4
+	dirty    bool
 
 	// Edge scrolling
 	EdgeScroll bool
 	EdgeSize   int
+
+	// Map bounds for clamping (0 = unclamped)
+	MapWidth, MapHeight int
 }
 
-// NewCamera3D creates an isometric camera
+const (
+	// Zoom limits in world-units visible across screen width.
+	// RA2-style: default ~25 tiles, close ~12, far ~55
+	ZoomDefault = 38.0 // ~25-30 tiles visible across, RA2-like
+	ZoomMin     = 15.0 // closest — see unit details (~10-12 tiles)
+	ZoomMax     = 60.0 // farthest — large area overview (~45-50 tiles)
+)
+
+// NewCamera3D creates an isometric camera with RA2-like defaults
 func NewCamera3D(screenW, screenH int) *Camera3D {
 	c := &Camera3D{
-		Zoom:       20, // 20 world units visible
+		Zoom:       ZoomDefault,
+		zoomTarget: ZoomDefault,
 		ScreenW:    screenW,
 		ScreenH:    screenH,
-		Pitch:      35.264 * math.Pi / 180, // true isometric angle
+		Pitch:      35.264 * math.Pi / 180,
 		Yaw:        45 * math.Pi / 180,
 		EdgeScroll: true,
 		EdgeSize:   20,
@@ -43,41 +58,96 @@ func NewCamera3D(screenW, screenH int) *Camera3D {
 	return c
 }
 
-// CenterOn centers camera on world position
+// SetMapSize stores map dimensions for camera clamping
+func (c *Camera3D) SetMapSize(w, h int) {
+	c.MapWidth = w
+	c.MapHeight = h
+}
+
+// CenterOn centers camera on world position (clamped to map)
 func (c *Camera3D) CenterOn(wx, wy float64) {
 	c.TargetX = wx
 	c.TargetY = wy
+	c.clampTarget()
 	c.dirty = true
 }
 
 // Pan moves the camera in screen-relative direction
 func (c *Camera3D) Pan(dx, dy float64) {
-	// Convert screen delta to world delta based on yaw
 	cosY := math.Cos(c.Yaw)
 	sinY := math.Sin(c.Yaw)
-	scale := c.Zoom / float64(c.ScreenW) // world units per pixel
+	scale := c.Zoom / float64(c.ScreenW)
 	c.TargetX += (dx*cosY + dy*sinY) * scale
 	c.TargetY += (-dx*sinY + dy*cosY) * scale
+	c.clampTarget()
 	c.dirty = true
 }
 
-// ZoomAt zooms toward a screen point
+// ZoomAt zooms toward a screen point (smooth, clamped)
 func (c *Camera3D) ZoomAt(delta float64, screenX, screenY int) {
-	// Get world pos before zoom
+	// Get world pos under cursor before zoom
 	wx, wy := c.ScreenToWorld(screenX, screenY)
-	c.Zoom *= 1 - delta*0.05
-	if c.Zoom < 5 {
-		c.Zoom = 5
-	}
-	if c.Zoom > 80 {
-		c.Zoom = 80
-	}
+
+	// Smooth zoom factor (3% per scroll notch)
+	factor := 1.0 - delta*0.03
+	factor = math.Max(0.85, math.Min(1.15, factor)) // clamp per-frame change
+	c.zoomTarget *= factor
+	c.zoomTarget = math.Max(ZoomMin, math.Min(ZoomMax, c.zoomTarget))
+
+	// Apply zoom (interpolated toward target for smoothness)
+	c.Zoom = c.zoomTarget
 	c.dirty = true
-	// Get world pos after zoom and adjust
+
+	// Get world pos after zoom and adjust to keep cursor-world stable
 	wx2, wy2 := c.ScreenToWorld(screenX, screenY)
 	c.TargetX += wx - wx2
 	c.TargetY += wy - wy2
+	c.clampTarget()
 	c.dirty = true
+}
+
+// SmoothUpdate interpolates zoom toward target (call once per frame)
+func (c *Camera3D) SmoothUpdate(dt float64) {
+	if math.Abs(c.Zoom-c.zoomTarget) > 0.01 {
+		t := 1.0 - math.Exp(-10.0*dt) // exponential ease
+		c.Zoom += (c.zoomTarget - c.Zoom) * t
+		c.Zoom = math.Max(ZoomMin, math.Min(ZoomMax, c.Zoom))
+		c.dirty = true
+	}
+}
+
+// clampTarget keeps the camera within map boundaries
+func (c *Camera3D) clampTarget() {
+	if c.MapWidth <= 0 || c.MapHeight <= 0 {
+		return
+	}
+	mw := float64(c.MapWidth)
+	mh := float64(c.MapHeight)
+
+	// Visible half-extents in world space
+	aspect := float64(c.ScreenW) / float64(c.ScreenH)
+	halfW := c.Zoom / 2
+	halfH := halfW / aspect
+	// The isometric view means the visible area on XZ is rotated.
+	// Use a conservative margin based on max of halfW, halfH.
+	margin := math.Max(halfW, halfH) * 0.6
+
+	minX := margin
+	minY := margin
+	maxX := mw - margin
+	maxY := mh - margin
+
+	// If map is smaller than view, center it
+	if maxX < minX {
+		c.TargetX = mw / 2
+	} else {
+		c.TargetX = math.Max(minX, math.Min(maxX, c.TargetX))
+	}
+	if maxY < minY {
+		c.TargetY = mh / 2
+	} else {
+		c.TargetY = math.Max(minY, math.Min(maxY, c.TargetY))
+	}
 }
 
 func (c *Camera3D) update() {
@@ -86,8 +156,7 @@ func (c *Camera3D) update() {
 	}
 	c.dirty = false
 
-	// Camera position: offset from target along isometric direction
-	dist := 100.0 // arbitrary distance for ortho (doesn't affect size)
+	dist := 100.0
 	eyeX := c.TargetX + dist*math.Sin(c.Yaw)*math.Cos(c.Pitch)
 	eyeY := dist * math.Sin(c.Pitch)
 	eyeZ := c.TargetY + dist*math.Cos(c.Yaw)*math.Cos(c.Pitch)
@@ -98,7 +167,6 @@ func (c *Camera3D) update() {
 
 	c.view = Mat4LookAt(eye, center, up)
 
-	// Orthographic projection
 	aspect := float64(c.ScreenW) / float64(c.ScreenH)
 	halfW := c.Zoom / 2
 	halfH := halfW / aspect
@@ -116,9 +184,7 @@ func (c *Camera3D) ViewProj() Mat4 {
 // Project3DToScreen converts a 3D world point to screen coordinates
 func (c *Camera3D) Project3DToScreen(wx, wy, wz float64) (int, int, float64) {
 	c.update()
-	// World space: X = east, Y = up, Z = south
 	clip := c.viewProj.TransformPoint(V3(wx, wy, wz))
-	// clip is in NDC [-1,1]
 	sx := (clip.X*0.5 + 0.5) * float64(c.ScreenW)
 	sy := (1 - (clip.Y*0.5 + 0.5)) * float64(c.ScreenH)
 	return int(sx), int(sy), clip.Z
@@ -133,18 +199,13 @@ func (c *Camera3D) WorldToScreen(tileX, tileY float64) (int, int) {
 // ScreenToWorld converts screen coords to world XZ plane (Y=0)
 func (c *Camera3D) ScreenToWorld(sx, sy int) (float64, float64) {
 	c.update()
-	// NDC
 	ndcX := (float64(sx)/float64(c.ScreenW))*2 - 1
 	ndcY := (1 - float64(sy)/float64(c.ScreenH))*2 - 1
 
-	// Inverse view-proj to get ray
-	// For ortho, we can compute directly
-	// Unproject two points on near/far plane
 	invVP := c.invertViewProj()
 	near := invVP.TransformPoint(V3(ndcX, ndcY, -1))
 	far := invVP.TransformPoint(V3(ndcX, ndcY, 1))
 
-	// Intersect with Y=0 plane
 	dir := far.Sub(near)
 	if math.Abs(dir.Y) < 1e-10 {
 		return near.X, near.Z
@@ -159,7 +220,6 @@ func (c *Camera3D) invertViewProj() Mat4 {
 
 // VisibleTileRange returns approximate tile range visible on screen
 func (c *Camera3D) VisibleTileRange(mapW, mapH int) (minX, minY, maxX, maxY int) {
-	// Sample screen corners
 	corners := [][2]int{{0, 0}, {c.ScreenW, 0}, {0, c.ScreenH}, {c.ScreenW, c.ScreenH}}
 	minXf, minYf := math.MaxFloat64, math.MaxFloat64
 	maxXf, maxYf := -math.MaxFloat64, -math.MaxFloat64
