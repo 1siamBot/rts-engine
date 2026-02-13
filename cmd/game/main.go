@@ -91,6 +91,10 @@ func NewGame() *Game {
 
 	g.hud = ui.NewHUD(ScreenWidth, ScreenHeight, g.techTree, g.players, 0)
 
+	// Wire up sprite rendering
+	g.hud.UnitDrawFn = g.renderer.DrawUnitSprite
+	g.hud.BuildingDrawFn = g.renderer.DrawBuildingSprite
+
 	g.fogSys = systems.NewFogSystem(g.tileMap.Width, g.tileMap.Height, g.players)
 
 	// Register systems
@@ -112,7 +116,7 @@ func NewGame() *Game {
 		Players: g.players,
 	})
 
-	g.renderer.Camera.CenterOn(float64(MapSize)/2, float64(MapSize)/2)
+	g.renderer.Camera.CenterOn(12, 12) // Center on player base
 
 	g.spawnInitialEntities()
 

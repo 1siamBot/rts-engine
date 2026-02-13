@@ -94,6 +94,10 @@ type HUD struct {
 
 	// Tick counter for animations
 	tick float64
+
+	// Sprite draw callbacks (set externally to use real sprites)
+	UnitDrawFn     func(screen *ebiten.Image, w *core.World, id core.EntityID, sx, sy int, playerID int) bool
+	BuildingDrawFn func(screen *ebiten.Image, w *core.World, id core.EntityID, sx, sy int) bool
 }
 
 func NewHUD(sw, sh int, tt *systems.TechTree, pm *core.PlayerManager, localPlayer int) *HUD {
@@ -270,9 +274,15 @@ func (h *HUD) DrawWorldEffects(screen *ebiten.Image, w *core.World, worldToScree
 			}
 		}
 
-		vector.DrawFilledCircle(screen, float32(sx), float32(sy), radius, unitColor, false)
-		// Subtle rim highlight
-		vector.StrokeCircle(screen, float32(sx), float32(sy), radius, 1.5, color.RGBA{255, 255, 255, 80}, false)
+		// Try sprite first, fall back to circle
+		spriteDrawn := false
+		if h.UnitDrawFn != nil {
+			spriteDrawn = h.UnitDrawFn(screen, w, id, sx, sy, own.PlayerID)
+		}
+		if !spriteDrawn {
+			vector.DrawFilledCircle(screen, float32(sx), float32(sy), radius, unitColor, false)
+			vector.StrokeCircle(screen, float32(sx), float32(sy), radius, 1.5, color.RGBA{255, 255, 255, 80}, false)
+		}
 
 		// Always show health bar above units
 		if hp := w.Get(id, core.CompHealth); hp != nil {
@@ -346,15 +356,18 @@ func (h *HUD) DrawWorldEffects(screen *ebiten.Image, w *core.World, worldToScree
 			}
 		}
 
-		// Normal building rendering
-		drawRoundedRect(screen, float32(sx)-bw/2, float32(sy)-bh/2, bw, bh, 3, bcolor)
-		drawRoundedRectStroke(screen, float32(sx)-bw/2, float32(sy)-bh/2, bw, bh, 3, borderColor)
-
-		// Construction Yard special icon
-		if bldg.IsConYard {
-			// Star/gear icon in center
-			vector.DrawFilledCircle(screen, float32(sx), float32(sy), 8, color.RGBA{255, 220, 50, 200}, false)
-			vector.StrokeCircle(screen, float32(sx), float32(sy), 8, 1, color.RGBA{255, 255, 200, 255}, false)
+		// Try sprite first, fall back to colored rect
+		bldgSpriteDrawn := false
+		if h.BuildingDrawFn != nil {
+			bldgSpriteDrawn = h.BuildingDrawFn(screen, w, id, sx, sy)
+		}
+		if !bldgSpriteDrawn {
+			drawRoundedRect(screen, float32(sx)-bw/2, float32(sy)-bh/2, bw, bh, 3, bcolor)
+			drawRoundedRectStroke(screen, float32(sx)-bw/2, float32(sy)-bh/2, bw, bh, 3, borderColor)
+			if bldg.IsConYard {
+				vector.DrawFilledCircle(screen, float32(sx), float32(sy), 8, color.RGBA{255, 220, 50, 200}, false)
+				vector.StrokeCircle(screen, float32(sx), float32(sy), 8, 1, color.RGBA{255, 255, 200, 255}, false)
+			}
 		}
 
 		// Health bar

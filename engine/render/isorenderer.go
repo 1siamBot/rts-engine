@@ -30,6 +30,7 @@ var TerrainColors = map[maplib.TerrainType]color.RGBA{
 type IsoRenderer struct {
 	Camera    *Camera
 	TileCache map[maplib.TerrainType]*ebiten.Image
+	Sprites   *SpriteManager
 }
 
 // NewIsoRenderer creates a new isometric renderer
@@ -38,6 +39,7 @@ func NewIsoRenderer(screenW, screenH int) *IsoRenderer {
 	r := &IsoRenderer{
 		Camera:    cam,
 		TileCache: make(map[maplib.TerrainType]*ebiten.Image),
+		Sprites:   NewSpriteManager(),
 	}
 	return r
 }
@@ -48,18 +50,34 @@ func (r *IsoRenderer) GetTileImage(terrain maplib.TerrainType, tw, th int) *ebit
 		return img
 	}
 
-	// Create isometric diamond tile
+	// Try to use HD sprite, scaled to tile size
+	if spriteImg, ok := r.Sprites.TerrainSprites[terrain]; ok {
+		// Scale sprite to match tile dimensions
+		sw := spriteImg.Bounds().Dx()
+		sh := spriteImg.Bounds().Dy()
+		if sw == tw && sh == th {
+			r.TileCache[terrain] = spriteImg
+			return spriteImg
+		}
+		// Scale
+		scaled := ebiten.NewImage(tw, th)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Scale(float64(tw)/float64(sw), float64(th)/float64(sh))
+		scaled.DrawImage(spriteImg, op)
+		r.TileCache[terrain] = scaled
+		return scaled
+	}
+
+	// Fallback: colored diamond
 	img := ebiten.NewImage(tw, th)
 	clr, ok := TerrainColors[terrain]
 	if !ok {
-		clr = color.RGBA{255, 0, 255, 255} // magenta for unknown
+		clr = color.RGBA{255, 0, 255, 255}
 	}
 
-	// Draw filled diamond
 	hw := float32(tw) / 2
 	hh := float32(th) / 2
 
-	// Use vector drawing for smooth diamond shape
 	var path vector.Path
 	path.MoveTo(hw, 0)
 	path.LineTo(float32(tw), hh)
@@ -77,13 +95,10 @@ func (r *IsoRenderer) GetTileImage(terrain maplib.TerrainType, tw, th int) *ebit
 		vs[i].ColorA = float32(clr.A) / 255
 	}
 
-	// Need a white pixel source image
 	whiteImg := ebiten.NewImage(3, 3)
 	whiteImg.Fill(color.White)
-
 	img.DrawTriangles(vs, is, whiteImg, nil)
 
-	// Draw outline
 	vector.StrokeLine(img, hw, 0, float32(tw), hh, 1, color.RGBA{0, 0, 0, 80}, false)
 	vector.StrokeLine(img, float32(tw), hh, hw, float32(th), 1, color.RGBA{0, 0, 0, 80}, false)
 	vector.StrokeLine(img, hw, float32(th), 0, hh, 1, color.RGBA{0, 0, 0, 80}, false)

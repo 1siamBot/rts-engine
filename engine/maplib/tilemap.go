@@ -78,8 +78,8 @@ func NewTileMap(name string, width, height int) *TileMap {
 		Width:      width,
 		Height:     height,
 		Tiles:      make([]Tile, width*height),
-		TileWidth:  64,
-		TileHeight: 32,
+		TileWidth:  128,
+		TileHeight: 64,
 		MaxPlayers: 2,
 	}
 
