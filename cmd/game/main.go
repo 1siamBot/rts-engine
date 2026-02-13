@@ -168,13 +168,14 @@ func NewGame() *Game {
 
 	// Start in main menu (unless screenshot mode which needs gameplay)
 	if screenshotTarget != "" {
-		g.menu.State = ui.StateMainMenu
-		// Don't play game loop yet in menu
+		// Screenshot mode: skip menu, go directly to gameplay
+		g.menu.State = ui.StatePlaying
+		g.gameLoop.Play()
 	} else {
 		g.menu.State = ui.StateMainMenu
+		// Pause game loop until game starts
+		g.gameLoop.Pause()
 	}
-	// Pause game loop until game starts
-	g.gameLoop.Pause()
 
 	return g
 }

@@ -120,11 +120,44 @@ func (sa *SpriteAtlas) GetUnitSprite(unitType, faction string) *ebiten.Image {
 			return sa.Get("units/soviet_tank_r0")
 		}
 		return sa.Get("units/allied_tank_r0")
-	case "mcv", "harvester":
+	case "mcv":
 		if faction == "Soviet" || faction == "soviet" {
+			if img := sa.Get("units/soviet_vehicle_f0"); img != nil {
+				return img
+			}
+		}
+		if img := sa.Get("units/allied_vehicle_f0"); img != nil {
+			return img
+		}
+	case "harvester":
+		// Use a different rotation frame to distinguish from MCV
+		if faction == "Soviet" || faction == "soviet" {
+			if img := sa.Get("units/soviet_vehicle_f2"); img != nil {
+				return img
+			}
 			return sa.Get("units/soviet_vehicle_f0")
 		}
+		if img := sa.Get("units/allied_vehicle_f2"); img != nil {
+			return img
+		}
 		return sa.Get("units/allied_vehicle_f0")
+	case "infantry":
+		// Use RA2 infantry sprites
+		if img := sa.Get("units/GI"); img != nil {
+			return img
+		}
+	case "engineer":
+		if img := sa.Get("units/ENGINEER"); img != nil {
+			return img
+		}
+	case "dog":
+		if img := sa.Get("units/DOG"); img != nil {
+			return img
+		}
+	}
+	// Fallback: try GI for any unmatched infantry
+	if unitType == "infantry" || unitType == "" {
+		return sa.Get("units/GI")
 	}
 	return nil
 }
