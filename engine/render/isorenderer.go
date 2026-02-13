@@ -44,14 +44,14 @@ func NewIsoRenderer(screenW, screenH int) *IsoRenderer {
 	return r
 }
 
-// GetTileImage returns (or creates) a cached tile image for a terrain type
+// GetTileImage returns (or creates) a cached tile image for a terrain type (default variant)
 func (r *IsoRenderer) GetTileImage(terrain maplib.TerrainType, tw, th int) *ebiten.Image {
 	if img, ok := r.TileCache[terrain]; ok {
 		return img
 	}
 
 	// Try to use HD sprite, scaled to tile size
-	if spriteImg, ok := r.Sprites.TerrainSprites[terrain]; ok {
+	if spriteImg, ok := r.Sprites.TerrainDefault[terrain]; ok {
 		// Scale sprite to match tile dimensions
 		sw := spriteImg.Bounds().Dx()
 		sh := spriteImg.Bounds().Dy()
@@ -134,7 +134,20 @@ func (r *IsoRenderer) DrawMap(screen *ebiten.Image, tm *maplib.TileMap) {
 			sx -= tw / 2
 			// sy is already at top of diamond due to iso math
 
-			tileImg := r.GetTileImage(tile.Terrain, tw, th)
+			// Use variant sprite based on tile position (deterministic)
+			var tileImg *ebiten.Image
+			variantImg := r.Sprites.GetTerrainVariant(tile.Terrain, x, y)
+			if variantImg != nil {
+				sw := variantImg.Bounds().Dx()
+				sh := variantImg.Bounds().Dy()
+				if sw == tw && sh == th {
+					tileImg = variantImg
+				} else {
+					tileImg = r.GetTileImage(tile.Terrain, tw, th)
+				}
+			} else {
+				tileImg = r.GetTileImage(tile.Terrain, tw, th)
+			}
 
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(float64(sx), float64(sy))
