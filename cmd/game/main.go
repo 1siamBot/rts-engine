@@ -15,7 +15,7 @@ import (
 	"github.com/1siamBot/rts-engine/engine/input"
 	"github.com/1siamBot/rts-engine/engine/maplib"
 	"github.com/1siamBot/rts-engine/engine/pathfind"
-	"github.com/1siamBot/rts-engine/engine/render"
+	"github.com/1siamBot/rts-engine/engine/render3d"
 	"github.com/1siamBot/rts-engine/engine/systems"
 	"github.com/1siamBot/rts-engine/engine/ui"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -30,7 +30,6 @@ const (
 	MapSize      = 64
 )
 
-// Screenshot globals
 var (
 	screenshotTarget string
 	screenshotFrame  int
@@ -39,7 +38,7 @@ var (
 
 // Game implements ebiten.Game
 type Game struct {
-	renderer *render.IsoRenderer
+	renderer *render3d.Renderer3D
 	tileMap  *maplib.TileMap
 	gameLoop *core.GameLoop
 	input    *input.InputState
@@ -64,7 +63,7 @@ type Game struct {
 
 func NewGame() *Game {
 	g := &Game{
-		renderer:    render.NewIsoRenderer(ScreenWidth, ScreenHeight),
+		renderer:    render3d.NewRenderer3D(ScreenWidth, ScreenHeight),
 		tileMap:     generateDemoMap(),
 		gameLoop:    core.NewGameLoop(TickRate),
 		input:       input.NewInputState(),
@@ -91,9 +90,13 @@ func NewGame() *Game {
 
 	g.hud = ui.NewHUD(ScreenWidth, ScreenHeight, g.techTree, g.players, 0)
 
-	// Wire up sprite rendering
-	g.hud.UnitDrawFn = g.renderer.DrawUnitSprite
-	g.hud.BuildingDrawFn = g.renderer.DrawBuildingSprite
+	// Wire up 3D sprite rendering callbacks (return false to use HUD default fallback)
+	g.hud.UnitDrawFn = func(screen *ebiten.Image, w *core.World, id core.EntityID, sx, sy int, playerID int) bool {
+		return false // Units are drawn by 3D renderer now
+	}
+	g.hud.BuildingDrawFn = func(screen *ebiten.Image, w *core.World, id core.EntityID, sx, sy int) bool {
+		return false // Buildings are drawn by 3D renderer now
+	}
 
 	g.fogSys = systems.NewFogSystem(g.tileMap.Width, g.tileMap.Height, g.players)
 
@@ -116,7 +119,7 @@ func NewGame() *Game {
 		Players: g.players,
 	})
 
-	g.renderer.Camera.CenterOn(12, 12) // Center on player base
+	g.renderer.Camera.CenterOn(12, 12)
 
 	g.spawnInitialEntities()
 
@@ -127,7 +130,7 @@ func NewGame() *Game {
 func (g *Game) spawnInitialEntities() {
 	w := g.gameLoop.World
 
-	// Player 0: Construction Yard (already deployed from MCV)
+	// Player 0: Construction Yard
 	cyID := w.Spawn()
 	w.Attach(cyID, &core.Position{X: 10, Y: 10})
 	w.Attach(cyID, &core.Health{Current: 1000, Max: 1000})
@@ -234,6 +237,7 @@ func (g *Game) spawnInitialEntities() {
 func (g *Game) Update() error {
 	g.input.Update()
 	g.hud.Update(1.0 / 60.0)
+	g.renderer.Update(1.0 / 60.0)
 
 	if g.input.IsKeyJustPressed(ebiten.KeyEscape) {
 		if g.hud.Placement.Active {
@@ -270,7 +274,6 @@ func (g *Game) Update() error {
 	if g.hud.Placement.Active {
 		g.hud.Placement.TileX = g.hoverTileX
 		g.hud.Placement.TileY = g.hoverTileY
-		// Validate placement
 		g.hud.Placement.Valid = g.canPlaceBuilding(g.hoverTileX, g.hoverTileY, g.hud.Placement.SizeX, g.hud.Placement.SizeY)
 	}
 
@@ -287,12 +290,9 @@ func (g *Game) Update() error {
 		}
 	}
 
-	// Deploy MCV hotkey (D key)
 	if g.input.IsKeyJustPressed(ebiten.KeyH) {
 		g.tryDeployMCV()
 	}
-
-	// Sell building hotkey (Delete)
 	if g.input.IsKeyJustPressed(ebiten.KeyDelete) {
 		g.trySellBuilding()
 	}
@@ -316,14 +316,11 @@ func (g *Game) Update() error {
 	// Handle left click
 	if g.input.LeftJustReleased && !g.input.Dragging {
 		if g.hud.Placement.Active && g.hud.Placement.Valid {
-			// Place building
 			g.placeBuilding()
 		} else if g.hud.IsInMinimap(g.input.MouseX, g.input.MouseY) {
-			// Click on minimap to move camera
 			wmx, wmy := g.hud.GetMinimapWorldPos(g.input.MouseX, g.input.MouseY, MapSize)
 			g.renderer.Camera.CenterOn(wmx, wmy)
 		} else if !g.hud.HandleClick(g.input.MouseX, g.input.MouseY) {
-			// Check sidebar building/unit click
 			if bKey := g.hud.GetSidebarBuildingClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); bKey != "" {
 				g.startBuildingPurchase(bKey)
 			} else if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY); uKey != "" {
@@ -335,17 +332,15 @@ func (g *Game) Update() error {
 		}
 	}
 
-	// Handle left click placement (also during drag cancel)
 	if g.input.LeftJustReleased && g.input.Dragging && !g.hud.Placement.Active {
 		g.handleBoxSelect()
 	}
 
-	// Queue unit shortcuts
 	if g.input.IsKeyJustPressed(ebiten.KeyQ) {
 		g.queueUnit("gi")
 	}
 
-	g.audioMgr.SetCameraPos(g.renderer.Camera.X, g.renderer.Camera.Y)
+	g.audioMgr.SetCameraPos(g.renderer.Camera.TargetX, g.renderer.Camera.TargetY)
 
 	g.gameLoop.Update()
 	g.eventBus.Dispatch()
@@ -380,7 +375,6 @@ func (g *Game) placeBuilding() {
 }
 
 func (g *Game) canPlaceBuilding(tileX, tileY, sizeX, sizeY int) bool {
-	// Check bounds and terrain
 	for dy := 0; dy < sizeY; dy++ {
 		for dx := 0; dx < sizeX; dx++ {
 			tx, ty := tileX+dx, tileY+dy
@@ -393,7 +387,6 @@ func (g *Game) canPlaceBuilding(tileX, tileY, sizeX, sizeY int) bool {
 			}
 		}
 	}
-	// Check near existing buildings
 	w := g.gameLoop.World
 	nearBuilding := false
 	for _, bid := range w.Query(core.CompBuilding, core.CompOwner, core.CompPosition) {
@@ -420,7 +413,6 @@ func (g *Game) tryDeployMCV() {
 			g.hud.SelectedIDs = nil
 			return
 		}
-		// Undeploy con yard
 		if bldg := w.Get(id, core.CompBuilding); bldg != nil {
 			b := bldg.(*core.Building)
 			if b.IsConYard {
@@ -440,6 +432,7 @@ func (g *Game) trySellBuilding() {
 			if b.Sellable {
 				pos := w.Get(id, core.CompPosition).(*core.Position)
 				g.hud.AddEffect(pos.X, pos.Y, "explosion", 15)
+				g.renderer.Particles.AddExplosion(pos.X, pos.Y)
 				systems.SellBuilding(w, id, g.techTree, g.players)
 			}
 		}
@@ -547,7 +540,7 @@ func (g *Game) handleCamera() {
 		}
 	}
 	if g.input.ScrollY != 0 {
-		cam.ZoomAt(g.input.ScrollY*0.1, g.input.MouseX, g.input.MouseY)
+		cam.ZoomAt(g.input.ScrollY, g.input.MouseX, g.input.MouseY)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) {
 		cam.Pan(float64(-g.input.MouseDX), float64(-g.input.MouseDY))
@@ -557,50 +550,35 @@ func (g *Game) handleCamera() {
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{12, 12, 20, 255})
 
-	// Draw map with terrain effects
-	g.drawMapWithEffects(screen)
+	// Draw 3D scene (terrain + buildings + units + projectiles + particles)
+	g.renderer.DrawScene(screen, g.tileMap, g.gameLoop.World, 0)
 
 	if g.showGrid {
 		g.renderer.DrawGrid(screen, g.tileMap)
 	}
 
-	// Fog of war
+	// Fog of war overlay
 	g.drawFogOverlay(screen)
 
-	// Hover tile highlight
+	// Hover tile highlight in 3D
 	if g.tileMap.InBounds(g.hoverTileX, g.hoverTileY) {
-		sx, sy := g.renderer.Camera.WorldToScreen(float64(g.hoverTileX), float64(g.hoverTileY))
-		tw := float32(g.tileMap.TileWidth)
-		th := float32(g.tileMap.TileHeight)
-		hw := tw / 2
-		hh := th / 2
-		cx := float32(sx)
-		cy := float32(sy) + hh
-		hoverColor := color.RGBA{255, 255, 0, 60}
-		vector.StrokeLine(screen, cx, cy-hh, cx+hw, cy, 2, hoverColor, false)
-		vector.StrokeLine(screen, cx+hw, cy, cx, cy+hh, 2, hoverColor, false)
-		vector.StrokeLine(screen, cx, cy+hh, cx-hw, cy, 2, hoverColor, false)
-		vector.StrokeLine(screen, cx-hw, cy, cx, cy-hh, 2, hoverColor, false)
+		g.drawHoverTile(screen)
 	}
 
-	// Draw entities via HUD (handles selection circles, health bars, effects)
-	worldToScreen := func(wx, wy float64) (int, int) {
-		return g.renderer.Camera.WorldToScreen(wx, wy)
+	// Health bars as 2D overlays at 3D projected positions
+	g.drawHealthBars(screen)
+
+	// Placement ghost in 3D
+	if g.hud.Placement.Active {
+		g.drawPlacementGhost(screen)
 	}
-	g.hud.DrawWorldEffects(screen, g.gameLoop.World, worldToScreen)
-
-	// Projectiles
-	g.drawProjectiles(screen)
-
-	// Placement ghost
-	g.hud.DrawPlacementGhost(screen, worldToScreen)
 
 	// Selection box
 	if x1, y1, x2, y2, active := g.input.DragRect(); active && !g.hud.Placement.Active {
 		g.renderer.DrawSelectionBox(screen, x1, y1, x2, y2)
 	}
 
-	// HUD panels
+	// HUD panels (2D overlay)
 	g.hud.Draw(screen, g.gameLoop.World)
 
 	// Placement mode indicator
@@ -620,106 +598,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		g.drawOverlay(screen, "GAME OVER", winner+" wins!")
 	}
-}
-
-func (g *Game) drawMapWithEffects(screen *ebiten.Image) {
-	tm := g.tileMap
-	tw := tm.TileWidth
-	th := tm.TileHeight
-
-	g.renderer.Camera.SetMapBounds(tm.Width, tm.Height, tw, th)
-	minX, minY, maxX, maxY := g.renderer.Camera.VisibleTileRange(tm.Width, tm.Height)
-
-	for y := minY; y <= maxY; y++ {
-		for x := minX; x <= maxX; x++ {
-			tile := tm.At(x, y)
-			if tile == nil {
-				continue
-			}
-			sx, sy := g.renderer.Camera.WorldToScreen(float64(x), float64(y))
-			sy -= int(tile.Height) * (th / 4)
-			sx -= tw / 2
-
-			tileImg := g.renderer.GetTileImage(tile.Terrain, tw, th)
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(float64(sx), float64(sy))
-			screen.DrawImage(tileImg, op)
-
-			// Water animation
-			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
-				g.hud.DrawWaterEffect(screen, sx, sy, tw, th)
-			}
-
-			// Ore sparkle
-			if tile.OreAmount > 0 {
-				g.hud.DrawOreSparkles(screen, x, y, tile.OreAmount, sx+tw/2, sy+th/2)
-			}
-		}
-	}
-}
-
-func (g *Game) drawOverlay(screen *ebiten.Image, title, subtitle string) {
-	overlay := ebiten.NewImage(ScreenWidth, ScreenHeight)
-	overlay.Fill(color.RGBA{0, 0, 0, 150})
-	screen.DrawImage(overlay, nil)
-
-	// Centered overlay box
-	boxW := float32(300)
-	boxH := float32(100)
-	boxX := float32(ScreenWidth)/2 - boxW/2
-	boxY := float32(ScreenHeight)/2 - boxH/2
-	vector.DrawFilledRect(screen, boxX, boxY, boxW, boxH, color.RGBA{15, 15, 30, 240}, false)
-	vector.StrokeRect(screen, boxX, boxY, boxW, boxH, 2, color.RGBA{0, 180, 220, 255}, false)
-
-	ebitenutil.DebugPrintAt(screen, title, int(boxX)+boxW_center(title, boxW), int(boxY)+25)
-	ebitenutil.DebugPrintAt(screen, subtitle, int(boxX)+boxW_center(subtitle, boxW), int(boxY)+50)
-}
-
-func boxW_center(text string, boxW float32) int {
-	textW := len(text) * 6
-	return int(boxW/2) - textW/2
-}
-
-func (g *Game) drawFogOverlay(screen *ebiten.Image) {
-	fog := g.fogSys.Fogs[0]
-	if fog == nil {
-		return
-	}
-	minX, minY, maxX, maxY := g.renderer.Camera.VisibleTileRange(g.tileMap.Width, g.tileMap.Height)
-	for y := minY; y <= maxY; y++ {
-		for x := minX; x <= maxX; x++ {
-			state := fog.At(x, y)
-			if state == systems.FogVisible {
-				continue
-			}
-			sx, sy := g.renderer.Camera.WorldToScreen(float64(x), float64(y))
-			tw := g.tileMap.TileWidth
-			th := g.tileMap.TileHeight
-			sx -= tw / 2
-			var alpha uint8
-			if state == systems.FogShroud {
-				alpha = 200
-			} else {
-				alpha = 80
-			}
-			fogImg := ebiten.NewImage(tw, th)
-			fogImg.Fill(color.RGBA{5, 5, 15, alpha})
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(float64(sx), float64(sy))
-			screen.DrawImage(fogImg, op)
-		}
-	}
-}
-
-func (g *Game) drawProjectiles(screen *ebiten.Image) {
-	w := g.gameLoop.World
-	for _, id := range w.Query(core.CompPosition, core.CompProjectile) {
-		pos := w.Get(id, core.CompPosition).(*core.Position)
-		sx, sy := g.renderer.Camera.WorldToScreen(pos.X, pos.Y)
-		// Glow effect
-		vector.DrawFilledCircle(screen, float32(sx), float32(sy), 5, color.RGBA{255, 200, 50, 80}, false)
-		vector.DrawFilledCircle(screen, float32(sx), float32(sy), 3, color.RGBA{255, 255, 100, 255}, false)
-	}
 
 	// Screenshot capture
 	frameCount++
@@ -736,6 +614,141 @@ func (g *Game) drawProjectiles(screen *ebiten.Image) {
 		log.Printf("Screenshot saved to %s (%dx%d)", screenshotTarget, ScreenWidth, ScreenHeight)
 		os.Exit(0)
 	}
+}
+
+func (g *Game) drawHoverTile(screen *ebiten.Image) {
+	x, y := g.hoverTileX, g.hoverTileY
+	hoverColor := color.RGBA{255, 255, 0, 80}
+
+	sx0, sy0, _ := g.renderer.Camera.Project3DToScreen(float64(x), 0.02, float64(y))
+	sx1, sy1, _ := g.renderer.Camera.Project3DToScreen(float64(x+1), 0.02, float64(y))
+	sx2, sy2, _ := g.renderer.Camera.Project3DToScreen(float64(x+1), 0.02, float64(y+1))
+	sx3, sy3, _ := g.renderer.Camera.Project3DToScreen(float64(x), 0.02, float64(y+1))
+
+	vector.StrokeLine(screen, float32(sx0), float32(sy0), float32(sx1), float32(sy1), 2, hoverColor, false)
+	vector.StrokeLine(screen, float32(sx1), float32(sy1), float32(sx2), float32(sy2), 2, hoverColor, false)
+	vector.StrokeLine(screen, float32(sx2), float32(sy2), float32(sx3), float32(sy3), 2, hoverColor, false)
+	vector.StrokeLine(screen, float32(sx3), float32(sy3), float32(sx0), float32(sy0), 2, hoverColor, false)
+}
+
+func (g *Game) drawHealthBars(screen *ebiten.Image) {
+	w := g.gameLoop.World
+	for _, id := range w.Query(core.CompPosition, core.CompHealth, core.CompOwner) {
+		pos := w.Get(id, core.CompPosition).(*core.Position)
+		hp := w.Get(id, core.CompHealth).(*core.Health)
+		if hp.Ratio() >= 1.0 {
+			continue // Don't show full health bars
+		}
+
+		// Project to screen with slight Y offset above the entity
+		heightOffset := 0.5
+		if w.Has(id, core.CompBuilding) {
+			heightOffset = 1.5
+		}
+		sx, sy, _ := g.renderer.Camera.Project3DToScreen(pos.X, heightOffset, pos.Y)
+
+		barWidth := 30
+		if w.Has(id, core.CompBuilding) {
+			barWidth = 50
+		}
+		g.renderer.DrawHealthBar(screen, sx, sy, hp.Ratio(), barWidth)
+	}
+}
+
+func (g *Game) drawPlacementGhost(screen *ebiten.Image) {
+	tx, ty := g.hud.Placement.TileX, g.hud.Placement.TileY
+	sx, sy := g.hud.Placement.SizeX, g.hud.Placement.SizeY
+
+	var outlineColor color.RGBA
+	if g.hud.Placement.Valid {
+		outlineColor = color.RGBA{0, 255, 0, 150}
+	} else {
+		outlineColor = color.RGBA{255, 0, 0, 150}
+	}
+
+	// Draw outline of placement area
+	for dx := 0; dx < sx; dx++ {
+		for dy := 0; dy < sy; dy++ {
+			fx, fy := float64(tx+dx), float64(ty+dy)
+			s0x, s0y, _ := g.renderer.Camera.Project3DToScreen(fx, 0.03, fy)
+			s1x, s1y, _ := g.renderer.Camera.Project3DToScreen(fx+1, 0.03, fy)
+			s2x, s2y, _ := g.renderer.Camera.Project3DToScreen(fx+1, 0.03, fy+1)
+			s3x, s3y, _ := g.renderer.Camera.Project3DToScreen(fx, 0.03, fy+1)
+
+			vector.StrokeLine(screen, float32(s0x), float32(s0y), float32(s1x), float32(s1y), 2, outlineColor, false)
+			vector.StrokeLine(screen, float32(s1x), float32(s1y), float32(s2x), float32(s2y), 2, outlineColor, false)
+			vector.StrokeLine(screen, float32(s2x), float32(s2y), float32(s3x), float32(s3y), 2, outlineColor, false)
+			vector.StrokeLine(screen, float32(s3x), float32(s3y), float32(s0x), float32(s0y), 2, outlineColor, false)
+		}
+	}
+}
+
+func (g *Game) drawFogOverlay(screen *ebiten.Image) {
+	fog := g.fogSys.Fogs[0]
+	if fog == nil {
+		return
+	}
+	minX, minY, maxX, maxY := g.renderer.Camera.VisibleTileRange(g.tileMap.Width, g.tileMap.Height)
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			state := fog.At(x, y)
+			if state == systems.FogVisible {
+				continue
+			}
+			var alpha uint8
+			if state == systems.FogShroud {
+				alpha = 200
+			} else {
+				alpha = 80
+			}
+
+			// Draw fog quad over tile
+			fx, fy := float64(x), float64(y)
+			s0x, s0y, _ := g.renderer.Camera.Project3DToScreen(fx, 0.05, fy)
+			s1x, s1y, _ := g.renderer.Camera.Project3DToScreen(fx+1, 0.05, fy)
+			s2x, s2y, _ := g.renderer.Camera.Project3DToScreen(fx+1, 0.05, fy+1)
+			s3x, s3y, _ := g.renderer.Camera.Project3DToScreen(fx, 0.05, fy+1)
+
+			fogColor := color.RGBA{5, 5, 15, alpha}
+
+			// Draw as two triangles
+			vs := [4]ebiten.Vertex{
+				{DstX: float32(s0x), DstY: float32(s0y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
+				{DstX: float32(s1x), DstY: float32(s1y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
+				{DstX: float32(s2x), DstY: float32(s2y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
+				{DstX: float32(s3x), DstY: float32(s3y), SrcX: 1, SrcY: 1, ColorR: float32(fogColor.R) / 255, ColorG: float32(fogColor.G) / 255, ColorB: float32(fogColor.B) / 255, ColorA: float32(alpha) / 255},
+			}
+
+			whiteImg := ebiten.NewImage(4, 4)
+			whiteImg.Fill(color.White)
+
+			indices := []uint16{0, 1, 2, 0, 2, 3}
+			op := &ebiten.DrawTrianglesOptions{}
+			op.Blend = ebiten.BlendSourceOver
+			screen.DrawTriangles(vs[:], indices, whiteImg, op)
+		}
+	}
+}
+
+func (g *Game) drawOverlay(screen *ebiten.Image, title, subtitle string) {
+	overlay := ebiten.NewImage(ScreenWidth, ScreenHeight)
+	overlay.Fill(color.RGBA{0, 0, 0, 150})
+	screen.DrawImage(overlay, nil)
+
+	boxW := float32(300)
+	boxH := float32(100)
+	boxX := float32(ScreenWidth)/2 - boxW/2
+	boxY := float32(ScreenHeight)/2 - boxH/2
+	vector.DrawFilledRect(screen, boxX, boxY, boxW, boxH, color.RGBA{15, 15, 30, 240}, false)
+	vector.StrokeRect(screen, boxX, boxY, boxW, boxH, 2, color.RGBA{0, 180, 220, 255}, false)
+
+	ebitenutil.DebugPrintAt(screen, title, int(boxX)+boxW_center(title, boxW), int(boxY)+25)
+	ebitenutil.DebugPrintAt(screen, subtitle, int(boxX)+boxW_center(subtitle, boxW), int(boxY)+50)
+}
+
+func boxW_center(text string, boxW float32) int {
+	textW := len(text) * 6
+	return int(boxW/2) - textW/2
 }
 
 func (g *Game) Layout(_, _ int) (int, int) {
@@ -794,7 +807,6 @@ func main() {
 	screenshot := flag.String("screenshot", "", "Render one frame to PNG file and exit")
 	flag.Parse()
 
-	// Default to software rendering on headless systems
 	if os.Getenv("EBITENGINE_GRAPHICS_LIBRARY") == "" {
 		os.Setenv("EBITENGINE_GRAPHICS_LIBRARY", "opengl")
 	}
@@ -805,11 +817,11 @@ func main() {
 			screenshotPath = "screenshot.png"
 		}
 		screenshotTarget = screenshotPath
-		screenshotFrame = 30 // capture after 30 frames to let game initialize and render properly
+		screenshotFrame = 30
 	}
 
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
-	ebiten.SetWindowTitle("⚔️ RTS Engine v0.3.0 — Modern Casual UI + MCV")
+	ebiten.SetWindowTitle("⚔️ RTS Engine v0.4.0 — Real 3D Isometric")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetVsyncEnabled(true)
 

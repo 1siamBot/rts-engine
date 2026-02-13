@@ -92,6 +92,9 @@ type HUD struct {
 	// Cached images for rounded rects
 	panelCache map[string]*ebiten.Image
 
+	// UI Sprites (metallic panels, buttons, icons)
+	Sprites *UISprites
+
 	// Tick counter for animations
 	tick float64
 
@@ -115,6 +118,7 @@ func NewHUD(sw, sh int, tt *systems.TechTree, pm *core.PlayerManager, localPlaye
 		HoverCmdIdx:    -1,
 		BuildProgress:  make(map[string]float64),
 		panelCache:     make(map[string]*ebiten.Image),
+		Sprites:        NewUISprites(),
 	}
 }
 
@@ -468,109 +472,121 @@ func (h *HUD) DrawPlacementGhost(screen *ebiten.Image, worldToScreen func(float6
 }
 
 func (h *HUD) drawTopBar(screen *ebiten.Image) {
-	// Full-width top bar
-	barW := float32(h.ScreenW)
-	drawRoundedRect(screen, 0, 0, barW, float32(h.TopBarHeight), 0, panelBG)
-	// Bottom accent line
-	vector.DrawFilledRect(screen, 0, float32(h.TopBarHeight)-2, barW, 2, accentCyan, false)
+	// Metallic panel background
+	panel := h.Sprites.GenerateTopBarPanel(h.ScreenW, h.TopBarHeight)
+	if panel != nil {
+		op := &ebiten.DrawImageOptions{}
+		screen.DrawImage(panel, op)
+	} else {
+		drawRoundedRect(screen, 0, 0, float32(h.ScreenW), float32(h.TopBarHeight), 0, panelBG)
+	}
 
 	player := h.Players.GetPlayer(h.LocalPlayer)
 	if player == nil {
 		return
 	}
 
-	// Credits icon + animated counter
+	// Credits section with gold icon
 	x := 15
 	y := 10
-	// Gold coin icon
-	vector.DrawFilledCircle(screen, float32(x+8), float32(y+8), 8, color.RGBA{255, 200, 0, 255}, false)
-	vector.StrokeCircle(screen, float32(x+8), float32(y+8), 8, 1, color.RGBA{200, 150, 0, 255}, false)
-	ebitenutil.DebugPrintAt(screen, "$", x+5, y+2)
+	// Gold coin (glossy circle)
+	vector.DrawFilledCircle(screen, float32(x+8), float32(y+10), 9, color.RGBA{255, 200, 0, 255}, false)
+	vector.DrawFilledCircle(screen, float32(x+7), float32(y+9), 6, color.RGBA{255, 230, 100, 255}, false)
+	vector.StrokeCircle(screen, float32(x+8), float32(y+10), 9, 1.5, color.RGBA{180, 140, 0, 255}, false)
+	ebitenutil.DebugPrintAt(screen, "$", x+5, y+4)
 
 	creditStr := fmt.Sprintf("$%d", int(h.DisplayCredits))
-	ebitenutil.DebugPrintAt(screen, creditStr, x+22, y+2)
+	ebitenutil.DebugPrintAt(screen, creditStr, x+24, y+4)
 
-	// Power indicator
+	// Power section with icon sprite
 	px := 200
 	hasPower := player.HasPower()
-	pwrColor := powerGreen
-	if !hasPower {
-		// Blinking red when low power
-		if int(h.tick*4)%2 == 0 {
-			pwrColor = powerRed
-		} else {
-			pwrColor = color.RGBA{150, 20, 20, 255}
+
+	if h.Sprites.IconPower != nil {
+		h.Sprites.DrawIcon(screen, h.Sprites.IconPower, px+10, y+10, 18)
+	} else {
+		pwrIconClr := powerGreen
+		if !hasPower && int(h.tick*4)%2 == 0 {
+			pwrIconClr = powerRed
 		}
+		vector.DrawFilledCircle(screen, float32(px+8), float32(y+10), 8, pwrIconClr, false)
 	}
 
-	// Lightning bolt icon
-	vector.DrawFilledCircle(screen, float32(px+8), float32(y+8), 8, pwrColor, false)
-	ebitenutil.DebugPrintAt(screen, "⚡", px+2, y+1)
-
 	powerStr := fmt.Sprintf("%d / %d", player.Power, player.PowerUse)
-	ebitenutil.DebugPrintAt(screen, powerStr, px+22, y+2)
+	ebitenutil.DebugPrintAt(screen, powerStr, px+24, y+4)
 
-	// Power bar
-	barX := float32(px + 90)
-	barY := float32(y + 4)
-	maxBarW := float32(100)
-	vector.DrawFilledRect(screen, barX, barY, maxBarW, 10, color.RGBA{20, 20, 30, 200}, false)
-	ratio := float32(1.0)
+	// Power bar with glossy sprite
+	barX := px + 100
+	barY := y + 2
+	barW := 120
+	barH := 16
+	ratio := 1.0
 	if player.PowerUse > 0 {
-		ratio = float32(player.Power) / float32(player.PowerUse)
+		ratio = float64(player.Power) / float64(player.PowerUse)
 		if ratio > 1 {
 			ratio = 1
 		}
 	}
-	vector.DrawFilledRect(screen, barX, barY, maxBarW*ratio, 10, pwrColor, false)
-	vector.StrokeRect(screen, barX, barY, maxBarW, 10, 1, panelBorder, false)
+	barType := "power"
+	if !hasPower {
+		barType = "health" // will use red bar
+	}
+	h.Sprites.DrawBar(screen, barX, barY, barW, barH, ratio, barType)
 
 	if !hasPower {
-		ebitenutil.DebugPrintAt(screen, "⚠ LOW POWER", px+200, y+2)
+		// Blinking warning
+		if int(h.tick*3)%2 == 0 {
+			ebitenutil.DebugPrintAt(screen, "⚠ LOW POWER", px+230, y+4)
+		}
 	}
 
-	// Game version + FPS on far right
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("FPS: %.0f", ebiten.ActualFPS()), h.ScreenW-80, y+2)
+	// FPS on far right
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("FPS: %.0f", ebiten.ActualFPS()), h.ScreenW-80, y+4)
 }
 
 func (h *HUD) drawSidebar(screen *ebiten.Image, w *core.World) {
-	sx := float32(h.ScreenW - h.SidebarWidth)
-	sy := float32(h.TopBarHeight)
-	sh := float32(h.ScreenH - h.TopBarHeight)
+	sx := h.ScreenW - h.SidebarWidth
+	sy := h.TopBarHeight
+	sh := h.ScreenH - h.TopBarHeight
 
-	// Background
-	drawRoundedRect(screen, sx, sy, float32(h.SidebarWidth), sh, 0, panelBG)
-	// Left accent line
-	vector.DrawFilledRect(screen, sx, sy, 2, sh, accentCyan, false)
+	// Metallic panel background
+	panel := h.Sprites.GenerateSidebarPanel(h.SidebarWidth, sh)
+	if panel != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(sx), float64(sy))
+		screen.DrawImage(panel, op)
+	} else {
+		drawRoundedRect(screen, float32(sx), float32(sy), float32(h.SidebarWidth), float32(sh), 0, panelBG)
+	}
 
-	// Tab buttons
+	// Tab buttons using sci-fi button sprites
 	tabNames := []string{"BUILD", "UNITS", "DEF"}
-	tabW := float32(h.SidebarWidth-20) / 3
+	tabW := (h.SidebarWidth - 20) / 3
 	for i, name := range tabNames {
-		tx := sx + 10 + float32(i)*tabW
+		tx := sx + 10 + i*tabW
 		ty := sy + 8
 		isActive := BuildTab(i) == h.ActiveTab
-		clr := btnNormal
+		state := "normal"
 		if isActive {
-			clr = btnActive
+			state = "active"
 		}
-		drawRoundedRect(screen, tx, ty, tabW-4, 22, 4, clr)
-		// Center text
-		textX := int(tx) + int(tabW-4)/2 - len(name)*3
-		ebitenutil.DebugPrintAt(screen, name, textX, int(ty)+6)
+
+		h.Sprites.DrawRectButton(screen, tx, ty, tabW-4, 24, state)
+		textX := tx + (tabW-4)/2 - len(name)*3
+		ebitenutil.DebugPrintAt(screen, name, textX, ty+7)
 	}
 
 	// Build items
-	y := int(sy) + 40
+	y := sy + 40
 	player := h.Players.GetPlayer(h.LocalPlayer)
 
 	switch h.ActiveTab {
 	case TabBuildings:
-		h.drawBuildingButtons(screen, w, int(sx), y, player)
+		h.drawBuildingButtons(screen, w, sx, y, player)
 	case TabUnits:
-		h.drawUnitButtons(screen, w, int(sx), y, player)
+		h.drawUnitButtons(screen, w, sx, y, player)
 	case TabDefense:
-		ebitenutil.DebugPrintAt(screen, "Coming soon...", int(sx)+20, y+20)
+		ebitenutil.DebugPrintAt(screen, "Coming soon...", sx+20, y+20)
 	}
 }
 
