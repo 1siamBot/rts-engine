@@ -1,6 +1,7 @@
 package render3d
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 	"sort"
@@ -24,6 +25,11 @@ type Renderer3D struct {
 	// Building model cache: key -> mesh
 	buildingModels map[string]*Mesh3D
 	unitModels     map[string]*Mesh3D
+
+	// Terrain cache
+	terrainCache     *Mesh3D
+	terrainCacheKey  string // "minX,minY,maxX,maxY"
+	terrainCacheTime float64
 }
 
 // NewRenderer3D creates the 3D renderer
@@ -49,12 +55,45 @@ func (r *Renderer3D) Update(dt float64) {
 	r.Particles.Update(dt)
 }
 
+// DrawSkyGradient fills the screen with a dark-blue-to-lighter-blue sky gradient
+func (r *Renderer3D) DrawSkyGradient(screen *ebiten.Image) {
+	h := r.Camera.ScreenH
+	w := r.Camera.ScreenW
+	// Draw in bands for efficiency
+	bands := 32
+	bandH := h / bands
+	if bandH < 1 {
+		bandH = 1
+	}
+	for i := 0; i < bands; i++ {
+		t := float64(i) / float64(bands)
+		// Top: darker blue, Bottom: lighter blue-gray
+		cr := uint8(8 + t*35)
+		cg := uint8(12 + t*45)
+		cb := uint8(45 + t*50)
+		by := i * bandH
+		bh := bandH
+		if i == bands-1 {
+			bh = h - by
+		}
+		vector.DrawFilledRect(screen, 0, float32(by), float32(w), float32(bh), color.RGBA{cr, cg, cb, 255}, false)
+	}
+}
+
 // DrawScene renders the complete 3D scene
 func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *core.World, localPlayerID int) {
-	// 1. Terrain
+	// 0. Sky gradient background
+	r.DrawSkyGradient(screen)
+
+	// 1. Terrain (cached, regenerated every 0.5s for water animation)
 	minX, minY, maxX, maxY := r.Camera.VisibleTileRange(tm.Width, tm.Height)
-	terrainMesh := GenerateTerrainMesh(tm, minX, minY, maxX, maxY, r.time)
-	r.renderMesh(screen, terrainMesh)
+	cacheKey := fmt.Sprintf("%d,%d,%d,%d", minX, minY, maxX, maxY)
+	if r.terrainCache == nil || r.terrainCacheKey != cacheKey || r.time-r.terrainCacheTime > 0.5 {
+		r.terrainCache = GenerateTerrainMesh(tm, minX, minY, maxX, maxY, r.time)
+		r.terrainCacheKey = cacheKey
+		r.terrainCacheTime = r.time
+	}
+	r.renderMesh(screen, r.terrainCache)
 
 	// 2. Collect all entities with depth sorting
 	type entityDraw struct {
@@ -310,9 +349,10 @@ func (r *Renderer3D) renderMesh(screen *ebiten.Image, mesh *Mesh3D) {
 		ay := vs[1].DstY - vs[0].DstY
 		bx := vs[2].DstX - vs[0].DstX
 		by := vs[2].DstY - vs[0].DstY
+		// Skip degenerate triangles only (no back-face culling — mixed winding)
 		cross := ax*by - ay*bx
-		if cross > 0 {
-			continue // back-facing
+		if cross > -0.5 && cross < 0.5 {
+			continue // degenerate
 		}
 
 		indices := []uint16{0, 1, 2}

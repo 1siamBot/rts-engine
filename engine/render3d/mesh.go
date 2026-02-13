@@ -185,6 +185,51 @@ func MakeRoof(w, h, d, peakH float64, c Color3) *Mesh3D {
 	return m
 }
 
+func MakeCone(radius, height float64, segments int, c Color3) *Mesh3D {
+	m := NewMesh()
+	if segments < 4 {
+		segments = 4
+	}
+	hh := height / 2
+	tip := V3(0, hh, 0)
+	bot := V3(0, -hh, 0)
+
+	for i := 0; i < segments; i++ {
+		a0 := float64(i) / float64(segments) * 2 * math.Pi
+		a1 := float64(i+1) / float64(segments) * 2 * math.Pi
+		x0, z0 := radius*math.Cos(a0), radius*math.Sin(a0)
+		x1, z1 := radius*math.Cos(a1), radius*math.Sin(a1)
+
+		p0b := V3(x0, -hh, z0)
+		p1b := V3(x1, -hh, z1)
+
+		// Side face normal (approximate)
+		slopeY := radius / height
+		n0 := V3(x0, slopeY, z0).Normalize()
+		n1 := V3(x1, slopeY, z1).Normalize()
+		nTip := n0.Add(n1).Scale(0.5).Normalize()
+
+		shade := 0.8 + 0.2*float64(i%2)
+		sc := Color3{c.R * shade, c.G * shade, c.B * shade}
+
+		m.AddTriangle(
+			Vertex3D{Pos: p0b, Normal: n0, Color: sc},
+			Vertex3D{Pos: p1b, Normal: n1, Color: sc},
+			Vertex3D{Pos: tip, Normal: nTip, Color: sc},
+		)
+
+		// Bottom cap
+		botN := V3(0, -1, 0)
+		bc := Color3{c.R * 0.5, c.G * 0.5, c.B * 0.5}
+		m.AddTriangle(
+			Vertex3D{Pos: bot, Normal: botN, Color: bc},
+			Vertex3D{Pos: p1b, Normal: botN, Color: bc},
+			Vertex3D{Pos: p0b, Normal: botN, Color: bc},
+		)
+	}
+	return m
+}
+
 func MakeFlatDisc(innerR, outerR, y float64, segments int, c Color3) *Mesh3D {
 	m := NewMesh()
 	n := V3(0, 1, 0)

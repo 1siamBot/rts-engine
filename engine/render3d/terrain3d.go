@@ -6,22 +6,37 @@ import (
 	"github.com/1siamBot/rts-engine/engine/maplib"
 )
 
-// TerrainColors maps terrain to base colors
+// TerrainColors maps terrain to bright, vivid base colors
 var TerrainBaseColors = map[maplib.TerrainType]Color3{
-	maplib.TerrainGrass:     {0.18, 0.55, 0.18},
-	maplib.TerrainDirt:      {0.55, 0.45, 0.35},
-	maplib.TerrainSand:      {0.85, 0.78, 0.58},
-	maplib.TerrainWater:     {0.15, 0.45, 0.85},
-	maplib.TerrainDeepWater: {0.05, 0.15, 0.55},
-	maplib.TerrainRock:      {0.50, 0.50, 0.50},
-	maplib.TerrainCliff:     {0.40, 0.38, 0.35},
-	maplib.TerrainRoad:      {0.55, 0.55, 0.55},
-	maplib.TerrainBridge:    {0.55, 0.35, 0.17},
-	maplib.TerrainOre:       {0.75, 0.65, 0.10},
-	maplib.TerrainGem:       {0.10, 0.80, 0.80},
-	maplib.TerrainSnow:      {0.92, 0.92, 0.96},
-	maplib.TerrainUrban:     {0.65, 0.65, 0.65},
-	maplib.TerrainForest:    {0.08, 0.40, 0.08},
+	maplib.TerrainGrass:     {0.38, 0.82, 0.28},
+	maplib.TerrainDirt:      {0.72, 0.58, 0.38},
+	maplib.TerrainSand:      {0.95, 0.88, 0.62},
+	maplib.TerrainWater:     {0.25, 0.60, 0.95},
+	maplib.TerrainDeepWater: {0.12, 0.30, 0.78},
+	maplib.TerrainRock:      {0.65, 0.63, 0.60},
+	maplib.TerrainCliff:     {0.58, 0.54, 0.48},
+	maplib.TerrainRoad:      {0.70, 0.68, 0.65},
+	maplib.TerrainBridge:    {0.68, 0.50, 0.28},
+	maplib.TerrainOre:       {0.92, 0.82, 0.18},
+	maplib.TerrainGem:       {0.18, 0.90, 0.90},
+	maplib.TerrainSnow:      {0.96, 0.96, 0.98},
+	maplib.TerrainUrban:     {0.75, 0.73, 0.70},
+	maplib.TerrainForest:    {0.20, 0.65, 0.15},
+}
+
+// perlinNoise simple hash-based noise for height variation
+func perlinNoise(x, y int) float64 {
+	h := uint32(x*73856093 ^ y*19349663)
+	h = (h >> 13) ^ h
+	h = h * (h*h*15731 + 789221) + 1376312589
+	return float64(h&0x7fffffff) / float64(0x7fffffff)
+}
+
+func smoothNoise(x, y int) float64 {
+	corners := (perlinNoise(x-1, y-1) + perlinNoise(x+1, y-1) + perlinNoise(x-1, y+1) + perlinNoise(x+1, y+1)) / 16.0
+	sides := (perlinNoise(x-1, y) + perlinNoise(x+1, y) + perlinNoise(x, y-1) + perlinNoise(x, y+1)) / 8.0
+	center := perlinNoise(x, y) / 4.0
+	return corners + sides + center
 }
 
 // GenerateTerrainMesh creates a 3D mesh for a tile range
@@ -41,52 +56,73 @@ func GenerateTerrainMesh(tm *maplib.TileMap, minX, minY, maxX, maxY int, time fl
 				baseColor = Color3{0.5, 0.5, 0.5}
 			}
 
-			// Add slight color variation per tile for natural look
+			// Per-tile color variation for natural look
 			hash := uint32(x*7919+y*7927+x*y*31) % 1000
-			variation := float64(hash)/1000.0*0.1 - 0.05
+			variation := float64(hash)/1000.0*0.08 - 0.04
 			baseColor.R = math.Max(0, math.Min(1, baseColor.R+variation))
-			baseColor.G = math.Max(0, math.Min(1, baseColor.G+variation))
-			baseColor.B = math.Max(0, math.Min(1, baseColor.B+variation))
+			baseColor.G = math.Max(0, math.Min(1, baseColor.G+variation*1.2))
+			baseColor.B = math.Max(0, math.Min(1, baseColor.B+variation*0.5))
 
-			// Height: tile height + slight noise
+			// Height: tile height + perlin noise variation
 			h := float64(tile.Height) * 0.15
-			noiseH := float64(hash%100) / 100.0 * 0.03
+			noiseH := smoothNoise(x, y) * 0.06
 			h += noiseH
 
 			// Water: animate with wave
 			if tile.Terrain == maplib.TerrainWater || tile.Terrain == maplib.TerrainDeepWater {
-				h = -0.05 + 0.03*math.Sin(time*2+float64(x)*0.5+float64(y)*0.7)
-				// Add specular highlight simulation
-				spec := 0.1 * math.Abs(math.Sin(time*1.5+float64(x)*0.3))
-				baseColor.R = math.Min(1, baseColor.R+spec)
-				baseColor.G = math.Min(1, baseColor.G+spec)
+				h = -0.05 + 0.04*math.Sin(time*2.0+float64(x)*0.5+float64(y)*0.7)
+				// Specular shimmer
+				spec := 0.15 * math.Abs(math.Sin(time*1.8+float64(x)*0.4+float64(y)*0.3))
+				baseColor.R = math.Min(1, baseColor.R+spec*0.3)
+				baseColor.G = math.Min(1, baseColor.G+spec*0.5)
 				baseColor.B = math.Min(1, baseColor.B+spec)
 			}
 
-			// Ore sparkle
+			// Ore golden sparkle
 			if tile.OreAmount > 0 {
-				sparkle := 0.2 * math.Abs(math.Sin(time*3+float64(x*7+y*13)))
+				sparkle := 0.25 * math.Abs(math.Sin(time*3+float64(x*7+y*13)))
 				baseColor.R = math.Min(1, baseColor.R+sparkle)
-				baseColor.G = math.Min(1, baseColor.G+sparkle*0.8)
+				baseColor.G = math.Min(1, baseColor.G+sparkle*0.7)
+				baseColor.B = math.Min(1, baseColor.B+sparkle*0.1)
 			}
 
 			fx, fz := float64(x), float64(y)
 
-			// Tile quad on XZ plane at height h
-			v0 := Vertex3D{Pos: V3(fx, h, fz), Normal: up, Color: baseColor}
-			v1 := Vertex3D{Pos: V3(fx+1, h, fz), Normal: up, Color: baseColor}
-			v2 := Vertex3D{Pos: V3(fx+1, h, fz+1), Normal: up, Color: baseColor}
-			v3 := Vertex3D{Pos: V3(fx, h, fz+1), Normal: up, Color: baseColor}
+			// Corner heights for smoother terrain
+			h00 := h
+			h10 := h + (smoothNoise(x+1, y)-smoothNoise(x, y))*0.02
+			h11 := h + (smoothNoise(x+1, y+1)-smoothNoise(x, y))*0.02
+			h01 := h + (smoothNoise(x, y+1)-smoothNoise(x, y))*0.02
+
+			v0 := Vertex3D{Pos: V3(fx, h00, fz), Normal: up, Color: baseColor}
+			v1 := Vertex3D{Pos: V3(fx+1, h10, fz), Normal: up, Color: baseColor}
+			v2 := Vertex3D{Pos: V3(fx+1, h11, fz+1), Normal: up, Color: baseColor}
+			v3 := Vertex3D{Pos: V3(fx, h01, fz+1), Normal: up, Color: baseColor}
 			mesh.AddQuad(v0, v1, v2, v3)
+
+			// Subtle grid lines (slightly darker edges)
+			gridColor := Color3{baseColor.R * 0.85, baseColor.G * 0.85, baseColor.B * 0.85}
+			gridW := 0.03
+			// Bottom edge
+			ge0 := Vertex3D{Pos: V3(fx, h00+0.005, fz), Normal: up, Color: gridColor}
+			ge1 := Vertex3D{Pos: V3(fx+1, h10+0.005, fz), Normal: up, Color: gridColor}
+			ge2 := Vertex3D{Pos: V3(fx+1, h10+0.005, fz+gridW), Normal: up, Color: gridColor}
+			ge3 := Vertex3D{Pos: V3(fx, h00+0.005, fz+gridW), Normal: up, Color: gridColor}
+			mesh.AddQuad(ge0, ge1, ge2, ge3)
+			// Left edge
+			gl0 := Vertex3D{Pos: V3(fx, h00+0.005, fz), Normal: up, Color: gridColor}
+			gl1 := Vertex3D{Pos: V3(fx+gridW, h00+0.005, fz), Normal: up, Color: gridColor}
+			gl2 := Vertex3D{Pos: V3(fx+gridW, h01+0.005, fz+1), Normal: up, Color: gridColor}
+			gl3 := Vertex3D{Pos: V3(fx, h01+0.005, fz+1), Normal: up, Color: gridColor}
+			mesh.AddQuad(gl0, gl1, gl2, gl3)
 
 			// Cliff/elevation side faces
 			if tile.Height > 0 {
-				sideColor := Color3{baseColor.R * 0.6, baseColor.G * 0.6, baseColor.B * 0.6}
-				// Check adjacent tiles for height differences and add sides
+				sideColor := Color3{baseColor.R * 0.65, baseColor.G * 0.65, baseColor.B * 0.65}
 				addTerrainSides(mesh, tm, x, y, h, sideColor)
 			}
 
-			// Forest: add tree stump geometry
+			// Forest: add 3D tree geometry (cone + cylinder)
 			if tile.Terrain == maplib.TerrainForest {
 				addTreeGeometry(mesh, fx+0.5, h, fz+0.5, hash)
 			}
@@ -137,21 +173,26 @@ func addTerrainSides(mesh *Mesh3D, tm *maplib.TileMap, x, y int, h float64, c Co
 }
 
 func addTreeGeometry(mesh *Mesh3D, cx, baseH, cz float64, hash uint32) {
-	// Simple tree: cylinder trunk + cone/cylinder canopy
-	trunkH := 0.3 + float64(hash%100)/500.0
-	trunkR := 0.05
+	trunkH := 0.25 + float64(hash%100)/600.0
+	trunkR := 0.04
 
-	// Trunk (simplified as 4-sided prism)
-	tc := Color3{0.4, 0.25, 0.1}
+	// Trunk (4-sided prism)
+	tc := Color3{0.45, 0.30, 0.12}
 	trunk := MakeBox(trunkR*2, trunkH, trunkR*2, tc)
 	trunkMat := Mat4Translate(cx, baseH+trunkH/2, cz)
 	mesh.Append(trunk.Transform(trunkMat))
 
-	// Canopy (box approximation of foliage)
-	canopyR := 0.2 + float64(hash%150)/500.0
-	canopyH := 0.25 + float64(hash%80)/400.0
-	cc := Color3{0.05, 0.35 + float64(hash%100)/500.0, 0.05}
-	canopy := MakeBox(canopyR*2, canopyH, canopyR*2, cc)
+	// Canopy as cone (using cylinder with tapered top approximation)
+	canopyR := 0.18 + float64(hash%150)/600.0
+	canopyH := 0.30 + float64(hash%80)/350.0
+	cc := Color3{0.08, 0.45 + float64(hash%100)/400.0, 0.06}
+	canopy := MakeCone(canopyR, canopyH, 6, cc)
 	canopyMat := Mat4Translate(cx, baseH+trunkH+canopyH/2, cz)
 	mesh.Append(canopy.Transform(canopyMat))
+
+	// Second smaller cone on top for fuller look
+	cc2 := Color3{cc.R + 0.03, cc.G + 0.08, cc.B + 0.02}
+	canopy2 := MakeCone(canopyR*0.65, canopyH*0.7, 6, cc2)
+	canopy2Mat := Mat4Translate(cx, baseH+trunkH+canopyH*0.8+canopyH*0.35, cz)
+	mesh.Append(canopy2.Transform(canopy2Mat))
 }
