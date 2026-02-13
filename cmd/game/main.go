@@ -49,13 +49,13 @@ type Game struct {
 	hud      *ui.HUD
 	audioMgr *audio.AudioManager
 	fogSys   *systems.FogSystem
+	menu     *ui.MenuSystem
 
 	// State
 	showGrid    bool
 	showMinimap bool
 	hoverTileX  int
 	hoverTileY  int
-	gameState   string
 
 	// Settings
 	scrollSpeed float64
@@ -76,7 +76,6 @@ func NewGame() *Game {
 		techTree:    systems.NewTechTree(),
 		audioMgr:    audio.NewAudioManager(),
 		showMinimap: true,
-		gameState:   "playing",
 		scrollSpeed: 500,
 	}
 
@@ -131,7 +130,52 @@ func NewGame() *Game {
 	// Mark initial building tiles as occupied
 	g.markInitialBuildingTiles()
 
-	g.gameLoop.Play()
+	// Menu system
+	g.menu = ui.NewMenuSystem(ScreenWidth, ScreenHeight, g.hud.Sprites)
+	g.menu.OnStartGame = func(s ui.SkirmishSettings) {
+		// Apply skirmish settings
+		player := g.players.GetPlayer(0)
+		if player != nil {
+			player.Credits = []int{5000, 10000, 20000}[s.StartingCredits]
+			player.Faction = []string{"Allied", "Soviet"}[s.Faction]
+		}
+		g.gameLoop.Play()
+	}
+	g.menu.OnResumeGame = func() {
+		g.gameLoop.Play()
+	}
+	g.menu.OnRestartGame = func() {
+		// Simple restart: reset credits and unpause
+		player := g.players.GetPlayer(0)
+		if player != nil {
+			player.Credits = 10000
+			player.Defeated = false
+		}
+		g.gameLoop.Play()
+	}
+	g.menu.OnQuitToMenu = func() {
+		g.gameLoop.Pause()
+	}
+	g.menu.OnExitGame = func() {
+		os.Exit(0)
+	}
+	g.menu.OnApplySettings = func(s ui.GameSettings) {
+		g.scrollSpeed = s.ScrollSpeed * 100
+		g.showMinimap = s.ShowMinimap
+		ebiten.SetVsyncEnabled(s.VSync)
+		ebiten.SetFullscreen(s.Fullscreen)
+	}
+
+	// Start in main menu (unless screenshot mode which needs gameplay)
+	if screenshotTarget != "" {
+		g.menu.State = ui.StateMainMenu
+		// Don't play game loop yet in menu
+	} else {
+		g.menu.State = ui.StateMainMenu
+	}
+	// Pause game loop until game starts
+	g.gameLoop.Pause()
+
 	return g
 }
 
@@ -255,6 +299,13 @@ func (g *Game) markInitialBuildingTiles() {
 
 func (g *Game) Update() error {
 	g.input.Update()
+	g.menu.Update(1.0 / 60.0)
+
+	// Non-playing states: only update menu
+	if g.menu.State != ui.StatePlaying {
+		return nil
+	}
+
 	g.hud.Update(1.0 / 60.0)
 	g.renderer.Update(1.0 / 60.0)
 	g.renderer.Camera.SmoothUpdate(1.0 / 60.0)
@@ -262,17 +313,11 @@ func (g *Game) Update() error {
 	if g.input.IsKeyJustPressed(ebiten.KeyEscape) {
 		if g.hud.Placement.Active {
 			g.cancelPlacementWithRefund()
-		} else if g.gameState == "playing" {
-			g.gameState = "paused"
+		} else {
+			g.menu.State = ui.StatePaused
 			g.gameLoop.Pause()
-		} else if g.gameState == "paused" {
-			g.gameState = "playing"
-			g.gameLoop.Play()
+			return nil
 		}
-	}
-
-	if g.gameState == "paused" || g.gameState == "gameover" {
-		return nil
 	}
 
 	g.handleCamera()
@@ -335,20 +380,23 @@ func (g *Game) Update() error {
 
 	// Handle left click
 	if g.input.LeftJustReleased && !g.input.Dragging {
-		if g.hud.Placement.Active && g.hud.Placement.Valid {
+		if g.hud.Placement.Active && g.hud.Placement.Valid &&
+			!g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
 			g.placeBuilding()
 		} else if g.hud.IsInMinimap(g.input.MouseX, g.input.MouseY) {
 			wmx, wmy := g.hud.GetMinimapWorldPos(g.input.MouseX, g.input.MouseY, MapSize)
 			g.renderer.Camera.CenterOn(wmx, wmy)
-		} else if !g.hud.HandleClick(g.input.MouseX, g.input.MouseY) {
-			if bKey := g.hud.GetSidebarBuildingClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); bKey != "" {
-				g.startBuildingPurchase(bKey)
-			} else if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY); uKey != "" {
-				g.queueUnit(uKey)
-			} else {
-				shift := ebiten.IsKeyPressed(ebiten.KeyShift)
-				g.handleSelection(wx, wy, shift)
-			}
+		} else if g.hud.HandleClick(g.input.MouseX, g.input.MouseY) {
+			// Tab or command button click handled
+		} else if bKey := g.hud.GetSidebarBuildingClick(g.input.MouseX, g.input.MouseY, g.gameLoop.World); bKey != "" {
+			g.startBuildingPurchase(bKey)
+		} else if uKey := g.hud.GetSidebarUnitClick(g.input.MouseX, g.input.MouseY); uKey != "" {
+			g.queueUnit(uKey)
+		} else if g.hud.IsInSidebar(g.input.MouseX, g.input.MouseY) {
+			// Click in sidebar but not on any button — consume to avoid selecting behind
+		} else {
+			shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+			g.handleSelection(wx, wy, shift)
 		}
 	}
 
@@ -364,12 +412,6 @@ func (g *Game) Update() error {
 
 	g.gameLoop.Update()
 	g.eventBus.Dispatch()
-
-	for _, p := range g.players.Players {
-		if p.Defeated && p.ID == 0 {
-			g.gameState = "gameover"
-		}
-	}
 
 	return nil
 }
@@ -636,6 +678,19 @@ func (g *Game) handleCamera() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	// Main menu / settings (no game scene)
+	if g.menu.State == ui.StateMainMenu || g.menu.State == ui.StateSkirmishSetup ||
+		(g.menu.State == ui.StateSettings && g.menu.PrevState == ui.StateMainMenu) {
+		g.menu.Draw(screen)
+
+		// Screenshot capture
+		frameCount++
+		if screenshotTarget != "" && frameCount >= screenshotFrame {
+			g.saveScreenshot(screen)
+		}
+		return
+	}
+
 	screen.Fill(color.RGBA{12, 12, 20, 255})
 
 	// Draw 3D scene (terrain + buildings + units + projectiles + particles)
@@ -674,34 +729,44 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Placing: %s (Click to place, ESC/Right-click to cancel)", g.hud.Placement.BuildingKey), 10, ScreenHeight-20)
 	}
 
-	// Pause/GameOver overlay
-	if g.gameState == "paused" {
-		g.drawOverlay(screen, "⏸ PAUSED", "Press ESC to resume")
+	// Overlay menus (pause, settings, game over) drawn on top of game scene
+	if g.menu.State != ui.StatePlaying {
+		g.menu.Draw(screen)
 	}
-	if g.gameState == "gameover" {
-		winner := "Enemy"
-		p := g.players.GetPlayer(1)
-		if p != nil && p.Defeated {
-			winner = "You"
+
+	// Game over detection
+	for _, p := range g.players.Players {
+		if p.Defeated && p.ID == 0 && g.menu.State == ui.StatePlaying {
+			g.menu.GameOverData = ui.GameOverStats{Victory: false}
+			g.menu.State = ui.StateGameOver
+			g.gameLoop.Pause()
 		}
-		g.drawOverlay(screen, "GAME OVER", winner+" wins!")
+		if p.Defeated && p.ID == 1 && g.menu.State == ui.StatePlaying {
+			g.menu.GameOverData = ui.GameOverStats{Victory: true}
+			g.menu.State = ui.StateGameOver
+			g.gameLoop.Pause()
+		}
 	}
 
 	// Screenshot capture
 	frameCount++
 	if screenshotTarget != "" && frameCount >= screenshotFrame {
-		f, err := os.Create(screenshotTarget)
-		if err != nil {
-			log.Fatalf("Screenshot: %v", err)
-		}
-		if err := png.Encode(f, screen); err != nil {
-			f.Close()
-			log.Fatalf("Screenshot encode: %v", err)
-		}
-		f.Close()
-		log.Printf("Screenshot saved to %s (%dx%d)", screenshotTarget, ScreenWidth, ScreenHeight)
-		os.Exit(0)
+		g.saveScreenshot(screen)
 	}
+}
+
+func (g *Game) saveScreenshot(screen *ebiten.Image) {
+	f, err := os.Create(screenshotTarget)
+	if err != nil {
+		log.Fatalf("Screenshot: %v", err)
+	}
+	if err := png.Encode(f, screen); err != nil {
+		f.Close()
+		log.Fatalf("Screenshot encode: %v", err)
+	}
+	f.Close()
+	log.Printf("Screenshot saved to %s (%dx%d)", screenshotTarget, ScreenWidth, ScreenHeight)
+	os.Exit(0)
 }
 
 func (g *Game) drawHoverTile(screen *ebiten.Image) {
@@ -836,25 +901,6 @@ func (g *Game) drawFogOverlay(screen *ebiten.Image) {
 		op.Blend = ebiten.BlendSourceOver
 		screen.DrawTriangles(vertices, indices, g.fogWhiteImg, op)
 	}
-}
-
-func (g *Game) drawOverlay(screen *ebiten.Image, title, subtitle string) {
-	vector.DrawFilledRect(screen, 0, 0, float32(ScreenWidth), float32(ScreenHeight), color.RGBA{0, 0, 0, 150}, false)
-
-	boxW := float32(300)
-	boxH := float32(100)
-	boxX := float32(ScreenWidth)/2 - boxW/2
-	boxY := float32(ScreenHeight)/2 - boxH/2
-	vector.DrawFilledRect(screen, boxX, boxY, boxW, boxH, color.RGBA{15, 15, 30, 240}, false)
-	vector.StrokeRect(screen, boxX, boxY, boxW, boxH, 2, color.RGBA{0, 180, 220, 255}, false)
-
-	ebitenutil.DebugPrintAt(screen, title, int(boxX)+boxW_center(title, boxW), int(boxY)+25)
-	ebitenutil.DebugPrintAt(screen, subtitle, int(boxX)+boxW_center(subtitle, boxW), int(boxY)+50)
-}
-
-func boxW_center(text string, boxW float32) int {
-	textW := len(text) * 6
-	return int(boxW/2) - textW/2
 }
 
 func (g *Game) Layout(_, _ int) (int, int) {

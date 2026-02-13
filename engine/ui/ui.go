@@ -1085,10 +1085,8 @@ func (h *HUD) HandleClick(mx, my int) bool {
 		}
 	}
 
-	// Sidebar build buttons
-	if mx >= h.ScreenW-h.SidebarWidth && my >= h.TopBarHeight+35 {
-		return true
-	}
+	// Sidebar build/unit buttons — don't consume here, let caller handle
+	// (returning true would prevent building purchase / unit queue logic)
 
 	// Command buttons
 	panelX := h.MinimapSize + 10
