@@ -1,10 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image/color"
+	"image/png"
 	"log"
 	"math"
+	"os"
 
 	"github.com/1siamBot/rts-engine/engine/ai"
 	"github.com/1siamBot/rts-engine/engine/audio"
@@ -760,6 +763,36 @@ func generateDemoMap() *maplib.TileMap {
 }
 
 func main() {
+	headless := flag.Bool("headless", false, "Run in headless mode (no window)")
+	screenshot := flag.String("screenshot", "", "Render one frame to PNG file and exit")
+	flag.Parse()
+
+	// Default to software rendering on headless systems
+	if os.Getenv("EBITENGINE_GRAPHICS_LIBRARY") == "" {
+		os.Setenv("EBITENGINE_GRAPHICS_LIBRARY", "opengl")
+	}
+
+	if *screenshot != "" || *headless {
+		// Screenshot mode: render 1 frame to PNG without opening a window
+		game := NewGame()
+		offscreen := ebiten.NewImage(ScreenWidth, ScreenHeight)
+		game.Draw(offscreen)
+		outPath := *screenshot
+		if outPath == "" {
+			outPath = "screenshot.png"
+		}
+		f, err := os.Create(outPath)
+		if err != nil {
+			log.Fatalf("Failed to create screenshot: %v", err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, offscreen); err != nil {
+			log.Fatalf("Failed to encode screenshot: %v", err)
+		}
+		log.Printf("Screenshot saved to %s", outPath)
+		return
+	}
+
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
 	ebiten.SetWindowTitle("⚔️ RTS Engine v0.3.0 — Modern Casual UI + MCV")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)

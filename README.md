@@ -16,16 +16,16 @@ A Real-Time Strategy game engine written in **Go**, inspired by Command & Conque
 - Player system with factions and resources
 - Event bus for game events
 
-### Planned
-- **Phase 2**: Pathfinding (A*, Flowfield)
-- **Phase 3**: Combat system (weapons, projectiles, AoE)
-- **Phase 4**: Economy (harvesting, building, tech tree)
-- **Phase 5**: AI system
-- **Phase 6**: Map Editor
-- **Phase 7**: UI/HUD (sidebar, build panel)
-- **Phase 8**: Audio (BGM, SFX)
-- **Phase 9**: Multiplayer (lockstep deterministic)
-- **Phase 10**: Polish (Fog of War, animations, campaigns)
+### Implemented ✅
+- **Phase 2**: Pathfinding (A*, Flowfield, NavGrid, Steering)
+- **Phase 3**: Combat system (weapons, projectiles, damage types, armor)
+- **Phase 4**: Economy (harvesting, building placement, tech tree)
+- **Phase 5**: AI system (multi-difficulty)
+- **Phase 6**: Map Editor (terrain painting, undo/redo, save/load)
+- **Phase 7**: UI/HUD (sidebar, build panel, control groups, minimap)
+- **Phase 8**: Audio (BGM, SFX framework)
+- **Phase 9**: Networking framework (lockstep, replay, lobby)
+- **Phase 10**: Fog of War, animations, MCV deploy/undeploy
 
 ## Tech Stack
 
@@ -81,6 +81,49 @@ engine/
 └── asset/      # Resource loading
 ```
 
+## Downloads
+
+Pre-built binaries for all platforms are available on the [GitHub Releases](https://github.com/1siamBot/rts-engine/releases) page.
+
+| Platform | Game | Map Editor |
+|----------|------|------------|
+| macOS Apple Silicon | `rts-game-darwin-arm64` | `rts-editor-darwin-arm64` |
+| macOS Intel | `rts-game-darwin-amd64` | `rts-editor-darwin-amd64` |
+| Linux x64 | `rts-game-linux-amd64` | `rts-editor-linux-amd64` |
+| Linux ARM64 | `rts-game-linux-arm64` | `rts-editor-linux-arm64` |
+| Windows x64 | `rts-game-windows-amd64.exe` | `rts-editor-windows-amd64.exe` |
+| Web (WASM) | `rts-engine-web.zip` | — |
+
+### macOS
+```bash
+chmod +x rts-game-darwin-arm64
+./rts-game-darwin-arm64
+```
+
+### Linux
+```bash
+chmod +x rts-game-linux-amd64
+./rts-game-linux-amd64
+```
+
+### Windows
+Double-click `rts-game-windows-amd64.exe` or run from terminal.
+
+### Web (WASM)
+Download `rts-engine-web.zip`, extract, and serve with any HTTP server:
+```bash
+unzip rts-engine-web.zip
+python3 -m http.server 8080
+# Open http://localhost:8080
+```
+
+### Headless Mode
+On systems without a display (e.g., headless servers):
+```bash
+./rts-game --screenshot output.png   # Render one frame to PNG
+./rts-game --headless                 # Same as --screenshot screenshot.png
+```
+
 ## License
 
-Private — © One Siam Soft Co., Ltd.
+MIT

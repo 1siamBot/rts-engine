@@ -67,7 +67,8 @@ type TileMap struct {
 // StartPos defines a player start position
 type StartPos struct {
 	PlayerSlot int `json:"player_slot"`
-	X, Y       int `json:"x"`
+	X          int `json:"x"`
+	Y          int `json:"y"`
 }
 
 // NewTileMap creates a new empty map
