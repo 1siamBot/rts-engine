@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"path/filepath"
 	"sort"
 
 	"github.com/1siamBot/rts-engine/engine/core"
@@ -18,6 +19,7 @@ type Renderer3D struct {
 	Lighting  LightingSetup
 	Particles *ParticleSystem
 	Sprites   *SpriteAtlas // RA2-style sprite billboards (optional)
+	TerrainTex *TerrainTextureAtlas // RA2-style terrain textures
 
 	// Internal
 	whiteImg *ebiten.Image
@@ -28,7 +30,7 @@ type Renderer3D struct {
 	unitModels     map[string]*Mesh3D
 	minimapImg     *ebiten.Image
 
-	// Terrain cache
+	// Terrain cache (fallback for untextured)
 	terrainCache      *Mesh3D
 	terrainCacheKey   string // "minX,minY,maxX,maxY"
 	waterCache        *Mesh3D
@@ -43,6 +45,7 @@ func NewRenderer3D(screenW, screenH int) *Renderer3D {
 		Lighting:       DefaultLighting(),
 		Particles:      NewParticleSystem(),
 		Sprites:        NewSpriteAtlas(),
+		TerrainTex:     NewTerrainTextureAtlas(),
 		buildingModels: make(map[string]*Mesh3D),
 		unitModels:     make(map[string]*Mesh3D),
 	}
@@ -51,9 +54,10 @@ func NewRenderer3D(screenW, screenH int) *Renderer3D {
 	r.whiteImg = ebiten.NewImage(4, 4)
 	r.whiteImg.Fill(color.White)
 
-	// Try to load RA2-style sprites
+	// Try to load RA2-style sprites and terrain textures
 	if assetsPath := FindAssetsPath(); assetsPath != "" {
 		r.Sprites.LoadFromDirectory(assetsPath)
+		r.TerrainTex.LoadFromDirectory(filepath.Join(assetsPath, "terrain"))
 	}
 
 	return r
@@ -77,10 +81,10 @@ func (r *Renderer3D) DrawSkyGradient(screen *ebiten.Image) {
 	}
 	for i := 0; i < bands; i++ {
 		t := float64(i) / float64(bands)
-		// Top: darker blue, Bottom: lighter blue-gray
-		cr := uint8(8 + t*35)
-		cg := uint8(12 + t*45)
-		cb := uint8(45 + t*50)
+		// Very dark background - map edges should be near-black
+		cr := uint8(4 + t*12)
+		cg := uint8(5 + t*15)
+		cb := uint8(12 + t*20)
 		by := i * bandH
 		bh := bandH
 		if i == bands-1 {
@@ -95,23 +99,31 @@ func (r *Renderer3D) DrawScene(screen *ebiten.Image, tm *maplib.TileMap, world *
 	// 0. Sky gradient background
 	r.DrawSkyGradient(screen)
 
-	// 1. Terrain (static cached, water animated separately)
+	// 1. Terrain
 	minX, minY, maxX, maxY := r.Camera.VisibleTileRange(tm.Width, tm.Height)
-	cacheKey := fmt.Sprintf("%d,%d,%d,%d", minX, minY, maxX, maxY)
-	if r.terrainCache == nil || r.terrainCacheKey != cacheKey {
-		r.terrainCache = GenerateTerrainMeshStatic(tm, minX, minY, maxX, maxY)
-		r.terrainCacheKey = cacheKey
-	}
-	r.renderMesh(screen, r.terrainCache)
 
-	// Water tiles (animated separately, lightweight)
-	waterKey := cacheKey
-	if r.waterCache == nil || r.waterCacheKey != waterKey || r.time-r.waterCacheTime > 0.05 {
-		r.waterCache = GenerateWaterMesh(tm, minX, minY, maxX, maxY, r.time)
-		r.waterCacheKey = waterKey
-		r.waterCacheTime = r.time
+	if r.TerrainTex.loaded {
+		// RA2-style textured terrain tiles
+		r.TerrainTex.RenderTexturedTerrain(screen, r.Camera, tm, minX, minY, maxX, maxY, r.time)
+		// Tree billboards on forest tiles
+		r.TerrainTex.RenderTreeBillboards(screen, r.Camera, tm, r.Sprites, minX, minY, maxX, maxY)
+	} else {
+		// Fallback: colored mesh terrain
+		cacheKey := fmt.Sprintf("%d,%d,%d,%d", minX, minY, maxX, maxY)
+		if r.terrainCache == nil || r.terrainCacheKey != cacheKey {
+			r.terrainCache = GenerateTerrainMeshStatic(tm, minX, minY, maxX, maxY)
+			r.terrainCacheKey = cacheKey
+		}
+		r.renderMesh(screen, r.terrainCache)
+
+		waterKey := cacheKey
+		if r.waterCache == nil || r.waterCacheKey != waterKey || r.time-r.waterCacheTime > 0.05 {
+			r.waterCache = GenerateWaterMesh(tm, minX, minY, maxX, maxY, r.time)
+			r.waterCacheKey = waterKey
+			r.waterCacheTime = r.time
+		}
+		r.renderMesh(screen, r.waterCache)
 	}
-	r.renderMesh(screen, r.waterCache)
 
 	// 2. Collect all entities with depth sorting
 	type entityDraw struct {

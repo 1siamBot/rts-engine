@@ -789,9 +789,9 @@ func (g *Game) drawFogOverlay(screen *ebiten.Image) {
 			}
 			var alphaF float32
 			if state == systems.FogShroud {
-				alphaF = float32(200) / 255
+				alphaF = float32(180) / 255
 			} else {
-				alphaF = float32(80) / 255
+				alphaF = float32(50) / 255
 			}
 
 			fx, fy := float64(x), float64(y)
