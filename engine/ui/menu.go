@@ -190,14 +190,12 @@ func (m *MenuSystem) updateMainMenu(mx, my int) {
 			m.State = StateSkirmishSetup
 		case 1: // MULTIPLAYER (placeholder)
 			// no-op
-		case 2: // MAP EDITOR (placeholder)
-			// no-op
-		case 3: // SETTINGS
+		case 2: // SETTINGS
 			m.PrevState = StateMainMenu
 			m.TempSettings = m.Settings
 			m.settingsTab = 0
 			m.State = StateSettings
-		case 4: // EXIT
+		case 3: // EXIT
 			if m.OnExitGame != nil {
 				m.OnExitGame()
 			}
@@ -209,8 +207,8 @@ func (m *MenuSystem) mainMenuButtons() []MenuButton {
 	cx := m.ScreenW / 2
 	startY := m.ScreenH/2 - 20
 	bw, bh, gap := 260, 40, 8
-	names := []string{"SKIRMISH", "MULTIPLAYER", "MAP EDITOR", "SETTINGS", "EXIT"}
-	disabled := []bool{false, true, true, false, false}
+	names := []string{"SKIRMISH", "MULTIPLAYER", "SETTINGS", "EXIT"}
+	disabled := []bool{false, true, false, false}
 	buttons := make([]MenuButton, len(names))
 	for i, name := range names {
 		buttons[i] = MenuButton{
