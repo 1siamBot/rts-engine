@@ -197,10 +197,29 @@ func (us *UISprites) loadRA2UIAssets() {
 	if img := loadUI(filepath.Join(ra2Dir, "icons", "credits.png")); img != nil { us.IconCredits = img; loaded++ }
 	if img := loadUI(filepath.Join(ra2Dir, "icons", "power.png")); img != nil { us.IconPower = img; loaded++ }
 
-	// Build icons
-	buildingKeys := []string{"construction_yard", "power_plant", "barracks", "refinery", "war_factory"}
+	// Build icons (real RA2 cameo icons extracted from game files)
+	buildingKeys := []string{
+		"construction_yard", "power_plant", "barracks", "refinery", "war_factory",
+		"radar", "tech_center", "wall", "pillbox", "prism_tower", "tesla_coil",
+		"flak_cannon", "iron_curtain", "chronosphere", "cloning_vat", "naval_yard",
+		"soviet_power_plant", "soviet_barracks", "soviet_war_factory", "soviet_refinery", "soviet_radar",
+	}
 	for _, key := range buildingKeys {
 		if img := loadUI(filepath.Join(ra2Dir, "icons", "build_"+key+".png")); img != nil {
+			us.BuildIcons[key] = img
+			loaded++
+		}
+	}
+
+	// Unit cameo icons
+	unitKeys := []string{
+		"gi", "conscript", "engineer", "attack_dog", "grizzly_tank", "grizzly",
+		"ifv", "harvester", "mcv", "rhino_tank", "rhino", "apocalypse",
+		"seal", "tanya", "spy", "sniper", "ivan", "yuri", "soviet_dog", "desolator",
+		"v3", "carrier", "destroyer", "dreadnought", "dolphin", "squid", "aegis",
+	}
+	for _, key := range unitKeys {
+		if img := loadUI(filepath.Join(ra2Dir, "icons", "unit_"+key+".png")); img != nil {
 			us.BuildIcons[key] = img
 			loaded++
 		}

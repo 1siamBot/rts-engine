@@ -697,9 +697,23 @@ func main() {
 		"conscript", "snipe", "ivan", "tanya", "seal", "engineer", "flakt", "dest",
 		"aegis", "carrier", "dred", "squid", "dolphin"}
 	cameos := []string{
-		"gacnsticon", "gapowricon", "gapileicon", "gaweapicon", "garefnicon",
-		"nacnsticon", "napowricon", "napileicon", "naweapicon", "narefnicon",
-		"powricon", "gacsphicon",
+		// Allied buildings
+		"powricon", "brrkicon", "gwepicon", "reficon", "radricon",
+		"techicon", "wallicon", "ayaricon", "csphicon", "pillicon",
+		"prisicon", "tpwricon", "gateicon",
+		// Soviet buildings
+		"npwricon", "handicon", "nwepicon", "nreficon", "nradicon",
+		"ntchicon", "nwalicon", "tslaicon", "flakicon", "ironicon",
+		"clonicon", "lasricon",
+		// Allied units
+		"giicon", "engnicon", "adogicon", "mtnkicon", "fvicon",
+		"harvicon", "mcvicon", "gtnkicon", "sealicon", "spyicon",
+		"tanyicon", "snipicon", "carricon", "desticon", "dlphicon",
+		// Soviet units
+		"dogicon", "e2icon", "desoicon", "rtnkicon", "v3icon",
+		"dredicon", "sqdicon", "ivanicon", "yuriicon",
+		// extra
+		"agisicon", "htnkicon",
 	}
 
 	// Build extraction list
@@ -712,9 +726,11 @@ func main() {
 
 	for _, b := range alliedBuildings {
 		targets = append(targets, target{b, ".shp", filepath.Join(*outputPath, "buildings", "allied")})
+		targets = append(targets, target{b, ".tem", filepath.Join(*outputPath, "buildings", "allied")})
 	}
 	for _, b := range sovietBuildings {
 		targets = append(targets, target{b, ".shp", filepath.Join(*outputPath, "buildings", "soviet")})
+		targets = append(targets, target{b, ".tem", filepath.Join(*outputPath, "buildings", "soviet")})
 	}
 	for _, t := range turrets {
 		targets = append(targets, target{t, ".shp", filepath.Join(*outputPath, "buildings", "turrets")})
